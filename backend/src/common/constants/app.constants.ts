@@ -9,6 +9,16 @@ export const API_PREFIX = 'api/v1';
 /** API version tag surfaced in Swagger and health responses. */
 export const API_VERSION = 'v1';
 
+/**
+ * Service identity reported by the health endpoints and Swagger.
+ *
+ * Mirrored from package.json rather than imported from it: importing JSON from
+ * `src/` would drag package.json into the TypeScript `rootDir` and change the
+ * emitted `dist/` layout. Keep these in sync when the package version changes.
+ */
+export const APP_NAME = 'aclp-backend';
+export const APP_VERSION = '0.1.0';
+
 /** Correlation id header. Accepted from callers, generated when absent. */
 export const REQUEST_ID_HEADER = 'x-request-id';
 

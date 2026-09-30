@@ -1,0 +1,53 @@
+{
+  "name": "aclp-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/lib/mock-services/repository.test.ts",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource-variable/newsreader": "latest",
+    "@fontsource-variable/onest": "latest",
+    "@fontsource/ibm-plex-mono": "latest",
+    "@hookform/resolvers": "latest",
+    "class-variance-authority": "latest",
+    "clsx": "latest",
+    "cn": "^0.4.0",
+    "date-fns": "latest",
+    "lucide-react": "latest",
+    "motion": "latest",
+    "next": "16.3.7",
+    "next-themes": "latest",
+    "radix-ui": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-hook-form": "latest",
+    "recharts": "^3.8.0",
+    "sonner": "latest",
+    "tailwind-merge": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "latest",
+    "@playwright/test": "latest",
+    "@tailwindcss/postcss": "latest",
+    "@types/node": "^22",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.7",
+    "tailwindcss": "latest",
+    "tsx": "latest",
+    "tw-animate-css": "latest",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
