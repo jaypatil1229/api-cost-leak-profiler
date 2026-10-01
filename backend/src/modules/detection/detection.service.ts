@@ -1,10 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { DetectionRunStatus, DetectorType, FindingStatus, Prisma } from '@prisma/client';
+import { DetectionRunStatus, FindingStatus, Prisma } from '@prisma/client';
 
 import {
   BadRequestAppException,
   NotFoundAppException,
-  NotImplementedAppException,
 } from '../../common/exceptions/app.exception';
 import {
   type PaginatedResult,
@@ -47,11 +46,13 @@ export class DetectionService {
       );
     }
 
+    const detector = this.registry.get(dto.detectorType);
     const run = await this.prisma.detectionRun.create({
       data: {
         organizationId,
         projectId: dto.projectId,
         detectorType: dto.detectorType,
+        detectorVersion: detector?.version ?? '1.0.0',
         status: DetectionRunStatus.PENDING,
         windowStart: dto.windowStart,
         windowEnd: dto.windowEnd,
@@ -94,6 +95,7 @@ export class DetectionService {
               organizationId,
               detectionRunId: runId,
               detectorType: dto.detectorType,
+              detectorVersion: detector?.version ?? '1.0.0',
               projectId: dto.projectId,
               title: finding.title,
               explanation: finding.explanation,
@@ -125,7 +127,7 @@ export class DetectionService {
             status: DetectionRunStatus.COMPLETED,
             completedAt: new Date(),
             recordsScanned: result.recordsScanned,
-            findingsCount: result.findings.length,
+            findingsCreated: result.findings.length,
           },
         });
       });
@@ -140,7 +142,7 @@ export class DetectionService {
           data: {
             status: DetectionRunStatus.FAILED,
             completedAt: new Date(),
-            errorMessage: error.message?.slice(0, 2000),
+            error: error.message?.slice(0, 2000),
           },
         })
         .catch((e: any) => this.logger.error(`Failed to mark run ${runId} as FAILED: ${e.message}`));
@@ -235,14 +237,10 @@ export class DetectionService {
 
     if (dto.status === FindingStatus.ACKNOWLEDGED) {
       data.acknowledgedAt = new Date();
-      data.acknowledgedByUser = { connect: { id: userId } };
+      data.acknowledgedBy = { connect: { id: userId } };
     } else if (dto.status === FindingStatus.RESOLVED) {
       data.resolvedAt = new Date();
-      data.resolvedByUser = { connect: { id: userId } };
-    }
-
-    if (dto.note !== undefined) {
-      data.note = dto.note;
+      data.resolvedBy = { connect: { id: userId } };
     }
 
     const updated = await this.prisma.detectionFinding.update({
@@ -264,15 +262,17 @@ function mapRunToDto(run: any): DetectionRunResponseDto {
     organizationId: run.organizationId,
     projectId: run.projectId,
     detectorType: run.detectorType,
+    detectorVersion: run.detectorVersion,
+    engine: run.engine,
     status: run.status,
     windowStart: run.windowStart instanceof Date ? run.windowStart.toISOString() : run.windowStart,
     windowEnd: run.windowEnd instanceof Date ? run.windowEnd.toISOString() : run.windowEnd,
-    triggeredByUserId: run.triggeredByUserId,
     startedAt: run.startedAt instanceof Date ? run.startedAt.toISOString() : (run.startedAt ?? null),
     completedAt: run.completedAt instanceof Date ? run.completedAt.toISOString() : (run.completedAt ?? null),
     recordsScanned: run.recordsScanned,
-    findingsCount: run.findingsCount,
-    errorMessage: run.errorMessage ?? null,
+    findingsCreated: run.findingsCreated,
+    error: run.error ?? null,
+    triggeredByUserId: run.triggeredByUserId ?? null,
     createdAt: run.createdAt instanceof Date ? run.createdAt.toISOString() : run.createdAt,
     updatedAt: run.updatedAt instanceof Date ? run.updatedAt.toISOString() : run.updatedAt,
   };
@@ -284,6 +284,7 @@ function mapFindingToDto(finding: any): FindingResponseDto {
     organizationId: finding.organizationId,
     detectionRunId: finding.detectionRunId ?? null,
     detectorType: finding.detectorType,
+    detectorVersion: finding.detectorVersion,
     projectId: finding.projectId,
     title: finding.title,
     explanation: finding.explanation,
@@ -292,7 +293,8 @@ function mapFindingToDto(finding: any): FindingResponseDto {
     evidence: finding.evidence ?? null,
     estimatedRecoverableCost: toMoneyString(finding.estimatedRecoverableCost),
     fingerprint: finding.fingerprint,
-    note: finding.note ?? null,
+    windowStart: finding.windowStart instanceof Date ? finding.windowStart.toISOString() : (finding.windowStart ?? null),
+    windowEnd: finding.windowEnd instanceof Date ? finding.windowEnd.toISOString() : (finding.windowEnd ?? null),
     acknowledgedAt: finding.acknowledgedAt instanceof Date ? finding.acknowledgedAt.toISOString() : (finding.acknowledgedAt ?? null),
     acknowledgedByUserId: finding.acknowledgedByUserId ?? null,
     resolvedAt: finding.resolvedAt instanceof Date ? finding.resolvedAt.toISOString() : (finding.resolvedAt ?? null),

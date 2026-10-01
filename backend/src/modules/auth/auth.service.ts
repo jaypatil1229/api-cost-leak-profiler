@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { MembershipStatus, OrgRole, OrganizationStatus, Prisma } from '@prisma/client';
+import { MembershipStatus, OrgRole, OrganizationStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 
 import { AuditAction } from '../../common/constants/audit-actions';
@@ -68,7 +68,6 @@ export class AuthService {
     const now = new Date();
     const familyId = randomUUID();
     const issued = this.tokens.issueRefreshToken(now);
-    const accessToken = await this.tokens.signAccessToken({ id: '', email });
 
     let user: UserPublicRow;
     let organization: { id: string; slug: string; name: string } | null = null;

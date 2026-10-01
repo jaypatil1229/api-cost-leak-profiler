@@ -7,8 +7,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
-  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -124,7 +122,7 @@ export class IngestUsageEventDto {
   @Min(0)
   completionCharCount?: number | null;
 
-  @ApiPropertyOptional({ type: 'object', nullable: true })
+  @ApiPropertyOptional({ type: 'object', additionalProperties: true })
   @IsOptional()
   metadata?: Record<string, unknown> | null;
 }

@@ -21,7 +21,7 @@ import type {
 export class PricingService {
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(APP_CONFIG) private readonly config: Configuration,
+    @Inject(APP_CONFIG) _config: Configuration,
   ) {}
 
   async list(query: PricingQueryDto): Promise<ModelPricingResponseDto[]> {

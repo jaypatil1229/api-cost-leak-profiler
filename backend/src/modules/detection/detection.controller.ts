@@ -40,7 +40,7 @@ export class DetectionController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: TriggerDetectionRunDto,
   ) {
-    return this.detectionService.triggerRun(org.organizationId, dto, user.userId);
+    return this.detectionService.triggerRun(org.organizationId, dto, user.id);
   }
 
   @Get('runs')
@@ -86,7 +86,7 @@ export class DetectionController {
       org.organizationId,
       findingId,
       dto,
-      user.userId,
+      user.id,
     );
   }
 }

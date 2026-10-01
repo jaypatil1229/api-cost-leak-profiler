@@ -1,9 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { IsEnum, IsISO8601, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { CallStatus, CostStatus, Provider } from '@prisma/client';
 
-import { PaginationQueryDto, SortOrderValue } from '../../../common/dto/pagination.dto';
+import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 
 export class UsageQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ format: 'date-time', description: 'Filter from this timestamp (inclusive).' })

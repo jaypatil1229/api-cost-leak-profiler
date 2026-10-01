@@ -18,7 +18,7 @@ import { PaginationMetaDto } from '../dto/pagination.dto';
 type ModelType = Type<unknown>;
 
 function envelopeSchema(model: ModelType | undefined, isArray = false): SchemaObject {
-  const dataSchema: SchemaObject = model
+  const dataSchema: any = model
     ? isArray
       ? { type: 'array', items: { $ref: getSchemaPath(model) } }
       : { $ref: getSchemaPath(model) }
@@ -30,7 +30,7 @@ function envelopeSchema(model: ModelType | undefined, isArray = false): SchemaOb
     properties: {
       success: { type: 'boolean', example: true },
       data: dataSchema,
-      meta: { $ref: getSchemaPath(ResponseMetaDto) },
+      meta: { $ref: getSchemaPath(ResponseMetaDto) } as any,
     },
   };
 }

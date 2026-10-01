@@ -2,15 +2,12 @@ import { Type } from 'class-transformer';
 import {
   IsDate,
   IsEnum,
-  IsIn,
-  IsJSON,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
-  ValidateNested,
 } from 'class-validator';
 import { ReportType } from '@prisma/client';
 

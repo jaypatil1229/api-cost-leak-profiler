@@ -3,8 +3,6 @@ import {
   AlertStatus,
   FindingStatus,
   Prisma,
-  ReportType,
-  Severity,
 } from '@prisma/client';
 
 import {
@@ -117,7 +115,7 @@ export class ReportsService {
         this.prisma.alert.count({
           where: {
             organizationId,
-            status: AlertStatus.ACTIVE,
+            status: AlertStatus.OPEN,
             ...(query.projectId && { projectId: query.projectId }),
           },
         }),
@@ -358,7 +356,7 @@ export class ReportsService {
         _count: true,
       }),
       this.prisma.alert.count({ where: alertWhere }),
-      this.prisma.alert.count({ where: { ...alertWhere, status: AlertStatus.ACTIVE } }),
+      this.prisma.alert.count({ where: { ...alertWhere, status: AlertStatus.OPEN } }),
     ]);
 
     return {

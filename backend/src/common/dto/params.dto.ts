@@ -8,6 +8,22 @@ export class UuidParamDto {
   id!: string;
 }
 
+export class OrganizationParamDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID('4')
+  organizationId!: string;
+}
+
+export class ProjectParamsDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID('4')
+  organizationId!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID('4')
+  projectId!: string;
+}
+
 export class OrganizationIdParamDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID('4')

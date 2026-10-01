@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { MembershipStatus, OrgRole, OrganizationStatus, Prisma } from '@prisma/client';
+import { MembershipStatus, OrgRole } from '@prisma/client';
 
 import { AuditAction } from '../../common/constants/audit-actions';
 import { ErrorCode } from '../../common/constants/error-codes';
@@ -10,7 +10,7 @@ import {
 } from '../../common/exceptions/app.exception';
 import { AuditService } from '../../common/services/audit.service';
 import type { AuditActor } from '../../common/types/request-context';
-import { normalizeEmail, slugify } from '../../common/utils/string.util';
+import { slugify } from '../../common/utils/string.util';
 import { APP_CONFIG } from '../../config/config.module';
 import type { Configuration } from '../../config/configuration';
 import { PrismaService } from '../../database/prisma.service';
@@ -20,7 +20,7 @@ export class OrganizationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
-    @Inject(APP_CONFIG) private readonly config: Configuration,
+    @Inject(APP_CONFIG) _config: Configuration,
   ) {}
 
   async findById(organizationId: string) {

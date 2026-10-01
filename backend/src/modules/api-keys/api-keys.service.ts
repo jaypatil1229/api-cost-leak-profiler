@@ -1,12 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ApiKeyScope, Prisma } from '@prisma/client';
+import { ApiKeyScope } from '@prisma/client';
 
 import { AuditAction } from '../../common/constants/audit-actions';
-import { ErrorCode } from '../../common/constants/error-codes';
 import { NotFoundAppException } from '../../common/exceptions/app.exception';
 import { AuditService } from '../../common/services/audit.service';
 import type { AuditActor } from '../../common/types/request-context';
-import { generateApiKey, maskedApiKey } from '../../common/utils/api-key.util';
+import { generateApiKey } from '../../common/utils/api-key.util';
 import { APP_CONFIG } from '../../config/config.module';
 import type { Configuration } from '../../config/configuration';
 import { PrismaService } from '../../database/prisma.service';

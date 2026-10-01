@@ -47,7 +47,7 @@ export class AlertsController {
       org.organizationId,
       alertId,
       dto,
-      user.userId,
+      user.id,
     );
   }
 }

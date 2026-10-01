@@ -1,17 +1,14 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
 
 import {
   RequireProjectRole,
-  RequireApiKeyScopes,
 } from '../../common/decorators/authorization.decorators';
 import {
   CurrentProject,
   CurrentUser,
   Req,
 } from '../../common/decorators/context.decorators';
-import { ApiKeyAuthenticated } from '../../common/decorators/public.decorator';
 import {
   ApiCreatedEnvelope,
   ApiOkEnvelope,
@@ -23,10 +20,8 @@ import type {
   RequestContext,
 } from '../../common/types/request-context';
 import { auditActorFromRequest } from '../../common/types/request-context';
-import { ApiKeyScope, OrgRole } from '@prisma/client';
+import { OrgRole } from '@prisma/client';
 import { maskedApiKey } from '../../common/utils/api-key.util';
-
-import { ApiKeyAuthGuard } from './guards/api-key-auth.guard';
 import {
   type ApiKeyCreatedResponseDto,
   type ApiKeyResponseDto,
@@ -119,7 +114,6 @@ export class ApiKeysController {
   @ApiOkEnvelope()
   @ApiStandardErrors({ notFound: true })
   async revoke(
-    @Param('projectId') projectId: string,
     @Param('apiKeyId') apiKeyId: string,
     @CurrentProject() projectContext: ProjectContext,
     @CurrentUser() user: AuthenticatedUser,
@@ -145,7 +139,6 @@ export class ApiKeysController {
   @ApiCreatedEnvelope()
   @ApiStandardErrors({ notFound: true })
   async rotate(
-    @Param('projectId') projectId: string,
     @Param('apiKeyId') apiKeyId: string,
     @CurrentProject() projectContext: ProjectContext,
     @CurrentUser() user: AuthenticatedUser,
@@ -154,7 +147,7 @@ export class ApiKeysController {
     const newKey = await this.apiKeysService.rotate({
       apiKeyId,
       organizationId: projectContext.organizationId,
-      projectId,
+      projectId: projectContext.projectId,
       createdByUserId: user.id,
       actor: auditActorFromRequest(req),
     });

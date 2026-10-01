@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsOptional } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -18,7 +18,7 @@ import {
   ApiOkEnvelope,
   ApiStandardErrors,
 } from '../../common/decorators/swagger.decorators';
-import { UuidParamDto } from '../../common/dto/params.dto';
+import { OrganizationParamDto } from '../../common/dto/params.dto';
 import type {
   AuthenticatedUser,
   OrganizationContext,
@@ -54,7 +54,7 @@ export class ProjectsController {
   async create(
     @Param() params: OrganizationParamDto,
     @Body() dto: CreateProjectDto,
-    @CurrentOrganization() orgContext: OrganizationContext,
+    @CurrentOrganization() _orgContext: OrganizationContext,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: RequestContext,
   ): Promise<ProjectResponseDto> {
@@ -91,7 +91,7 @@ export class ProjectsController {
   async list(
     @Param() params: OrganizationParamDto,
     @Query() query: ListProjectsQueryDto,
-    @CurrentOrganization() orgContext: OrganizationContext,
+    @CurrentOrganization() _orgContext: OrganizationContext,
   ): Promise<{ projects: ProjectResponseDto[] }> {
     const projects = await this.projectsService.listByOrganization(
       params.organizationId,

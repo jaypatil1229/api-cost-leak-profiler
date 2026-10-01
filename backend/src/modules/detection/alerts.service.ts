@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { AlertStatus, Prisma, Severity } from '@prisma/client';
+import { Prisma, Severity } from '@prisma/client';
 
 import { NotFoundAppException } from '../../common/exceptions/app.exception';
 import {
@@ -32,7 +32,10 @@ export class AlertsService {
       id: string;
       projectId: string;
       title: string;
+      description: string;
       severity: Severity;
+      evidence: unknown;
+      estimatedRecoverableCost: Prisma.Decimal | null;
     },
   ): Promise<void> {
     await this.prisma.alert.create({
@@ -40,11 +43,13 @@ export class AlertsService {
         organizationId,
         projectId: finding.projectId,
         findingId: finding.id,
-        category: 'COST_ANOMALY',
+        category: 'COST_LEAK',
         severity: finding.severity,
         title: finding.title,
-        message: `Detection finding: ${finding.title}`,
-        status: AlertStatus.ACTIVE,
+        message: finding.description,
+        evidence: finding.evidence as Prisma.InputJsonValue,
+        estimatedRecoverableCost: finding.estimatedRecoverableCost,
+        status: 'OPEN',
       },
     });
     this.logger.log(`Alert created for finding ${finding.id} in org ${organizationId}`);
@@ -99,12 +104,12 @@ export class AlertsService {
 
     const data: Prisma.AlertUpdateInput = { status: dto.status };
 
-    if (dto.status === AlertStatus.ACKNOWLEDGED) {
+    if (dto.status === 'ACKNOWLEDGED') {
       data.acknowledgedAt = new Date();
-      data.acknowledgedByUser = { connect: { id: userId } };
-    } else if (dto.status === AlertStatus.RESOLVED) {
+      data.acknowledgedBy = { connect: { id: userId } };
+    } else if (dto.status === 'RESOLVED') {
       data.resolvedAt = new Date();
-      data.resolvedByUser = { connect: { id: userId } };
+      data.resolvedBy = { connect: { id: userId } };
     }
 
     const updated = await this.prisma.alert.update({
@@ -126,6 +131,9 @@ function mapAlertToDto(alert: any): AlertResponseDto {
     severity: alert.severity,
     title: alert.title,
     message: alert.message,
+    evidence: alert.evidence ?? null,
+    estimatedRecoverableCost:
+      alert.estimatedRecoverableCost?.toString() ?? null,
     status: alert.status,
     acknowledgedAt: alert.acknowledgedAt instanceof Date ? alert.acknowledgedAt.toISOString() : (alert.acknowledgedAt ?? null),
     acknowledgedByUserId: alert.acknowledgedByUserId ?? null,

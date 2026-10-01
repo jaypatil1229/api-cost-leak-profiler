@@ -42,7 +42,7 @@ export interface ApiKeyContext {
   keyPrefix: string;
 }
 
-export interface RequestContext extends Request {
+export interface RequestContext extends Omit<Request, 'id'> {
   /** Correlation id — set by pino-http from `x-request-id` or generated. */
   id?: string;
   user?: AuthenticatedUser;

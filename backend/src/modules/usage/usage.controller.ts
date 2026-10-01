@@ -16,7 +16,7 @@ import type { OrganizationContext } from '../../common/types/request-context';
 import {
   type AttributionBreakdownItemDto,
   type TimeseriesBucketDto,
-  type UsageRecordResponseDto,
+  UsageRecordResponseDto,
   UsageQueryDto,
   type UsageSummaryDto,
 } from './dto/usage.dto';
@@ -34,7 +34,7 @@ export class UsageController {
     description:
       'Returns paginated usage records scoped to the organization. Supports filtering by project, provider, model, date range, and attribution dimensions.',
   })
-  @ApiPaginatedEnvelope()
+  @ApiPaginatedEnvelope(UsageRecordResponseDto as any)
   @ApiStandardErrors({ notFound: true })
   async list(
     @Query() query: UsageQueryDto,

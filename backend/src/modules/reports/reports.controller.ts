@@ -63,7 +63,7 @@ export class ReportsController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateSavedReportDto,
   ) {
-    return this.reportsService.createSavedReport(org.organizationId, dto, user.userId);
+    return this.reportsService.createSavedReport(org.organizationId, dto, user.id);
   }
 
   @Get('saved')

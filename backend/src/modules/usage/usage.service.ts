@@ -4,7 +4,6 @@ import { Prisma } from '@prisma/client';
 import { NotFoundAppException } from '../../common/exceptions/app.exception';
 import {
   type PaginatedResult,
-  type ResolvedPagination,
   paginated,
   resolvePagination,
 } from '../../common/dto/pagination.dto';

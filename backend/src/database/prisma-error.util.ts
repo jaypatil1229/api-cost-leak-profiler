@@ -47,6 +47,9 @@ export function uniqueConstraintFields(error: unknown): string[] {
   if (!isUniqueConstraintError(error)) {
     return [];
   }
+  if (!isPrismaKnownError(error)) {
+    return [];
+  }
   const target = (error.meta as { target?: unknown } | undefined)?.target;
   if (Array.isArray(target)) {
     return target.filter((entry): entry is string => typeof entry === 'string');

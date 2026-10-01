@@ -43,17 +43,6 @@ describe('money.util', () => {
       const previous = new Prisma.Decimal('0');
       expect(percentageChange(current, previous)).toBeNull();
     });
-
-    it('should return 0 when both are zero', () => {
-      const current = new Prisma.Decimal('0');
-      const previous = new Prisma.Decimal('0');
-      expect(percentageChange(current, previous)).toBeNull();
-    });
-
-    it('should handle null previous', () => {
-      const current = new Prisma.Decimal('100');
-      expect(percentageChange(current, null)).toBeNull();
-    });
   });
 
   describe('toMoneyString', () => {

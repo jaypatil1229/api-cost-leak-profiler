@@ -11,7 +11,7 @@ import {
   ApiOkEnvelope,
   ApiStandardErrors,
 } from '../../common/decorators/swagger.decorators';
-import { UuidParamDto } from '../../common/dto/params.dto';
+import { OrganizationParamDto } from '../../common/dto/params.dto';
 import type { AuthenticatedUser, OrganizationContext, RequestContext } from '../../common/types/request-context';
 import { auditActorFromRequest } from '../../common/types/request-context';
 import { OrgRole } from '@prisma/client';
@@ -96,7 +96,7 @@ export class OrganizationsController {
   async update(
     @Param() params: OrganizationParamDto,
     @Body() dto: UpdateOrganizationDto,
-    @CurrentOrganization() orgContext: OrganizationContext,
+    @CurrentOrganization() _orgContext: OrganizationContext,
     @Req() req: RequestContext,
   ): Promise<OrganizationResponseDto> {
     const org = await this.organizationsService.update({
@@ -113,7 +113,7 @@ export class OrganizationsController {
       plan: org.plan,
       status: org.status,
       ownerUserId: org.ownerUserId,
-      role: orgContext.role,
+      role: _orgContext.role,
       createdAt: org.createdAt.toISOString(),
       updatedAt: org.updatedAt.toISOString(),
     };
@@ -129,7 +129,7 @@ export class OrganizationsController {
   @ApiOkEnvelope()
   @ApiStandardErrors({ notFound: true })
   async transferOwnership(
-    @Param() params: UuidParamDto,
+    @Param() params: OrganizationParamDto,
     @Body() dto: TransferOwnershipDto,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: RequestContext,
@@ -149,7 +149,7 @@ export class OrganizationsController {
   @ApiOperation({ summary: 'List organization members' })
   @ApiOkEnvelope()
   @ApiStandardErrors()
-  async listMembers(@Param() params: UuidParamDto): Promise<{ members: MemberResponseDto[] }> {
+  async listMembers(@Param() params: OrganizationParamDto): Promise<{ members: MemberResponseDto[] }> {
     const members = await this.organizationsService.listMembers(params.organizationId);
 
     return {

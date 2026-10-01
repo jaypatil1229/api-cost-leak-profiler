@@ -1,12 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { CallStatus, CostStatus, IngestionBatchStatus, Prisma } from '@prisma/client';
+import { CallStatus, CostStatus, IngestionBatchStatus, Prisma, Provider } from '@prisma/client';
 
 import {
   MAX_EVENT_AGE_MS,
   MAX_EVENT_CLOCK_SKEW_MS,
-  TOKENS_PER_PRICING_UNIT,
 } from '../../common/constants/app.constants';
-import { BadRequestAppException } from '../../common/exceptions/app.exception';
 import { sanitizeMetadata } from '../../common/utils/metadata.util';
 import { costForTokens } from '../../common/utils/money.util';
 import { APP_CONFIG } from '../../config/config.module';
@@ -36,7 +34,7 @@ export class IngestionService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(APP_CONFIG) private readonly config: Configuration,
+    @Inject(APP_CONFIG) _config: Configuration,
   ) {}
 
   async ingestSingle(input: {
@@ -217,7 +215,7 @@ export class IngestionService {
           costStatus: cost.status,
           modelPricingId: pricing?.id ?? null,
           pricingVersion: pricing?.version ?? null,
-          metadata: sanitized.metadata as Prisma.InputJsonValue | null,
+          metadata: sanitized.metadata ? (sanitized.metadata as Prisma.InputJsonValue) : Prisma.DbNull,
           sdkName: input.sdkName ?? null,
           sdkVersion: input.sdkVersion ?? null,
           apiKeyId: input.apiKeyId,
@@ -269,7 +267,7 @@ export class IngestionService {
   private async findPricing(provider: string, model: string, occurredAt: Date) {
     const pricing = await this.prisma.modelPricing.findFirst({
       where: {
-        provider,
+        provider: provider as Provider,
         model,
         effectiveFrom: { lte: occurredAt },
         OR: [{ effectiveTo: null }, { effectiveTo: { gt: occurredAt } }],
