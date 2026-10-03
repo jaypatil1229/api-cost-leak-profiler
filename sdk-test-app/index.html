@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resume Studio · ACLP SDK test app</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top"><div class="brand"><span class="mark">R</span><div><strong>Resume Studio</strong><small>ACLP instrumentation playground</small></div></div><span id="connection" class="pill">Checking setup…</span></header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">DEMO WORKSPACE</p><h1>Build career docs.<br><em>See what they cost.</em></h1><p class="lede">Run realistic Gemini features and controlled usage patterns. Each call records token counts, feature, session, latency, and a privacy-preserving prompt hash.</p></div><div class="intro-note"><strong>Direct provider calls</strong><span>Gemini response usage is captured, then sent to your ACLP ingestion endpoint in the background.</span></div></section>
+    <section class="grid">
+      <article class="card controls"><div class="section-heading"><div><p class="eyebrow">01 · RUN A FEATURE</p><h2>Career workspace</h2></div><span class="count">6 features</span></div>
+        <label>Feature<select id="feature"><option value="resume.builder">Resume builder</option><option value="document.creation">Document creation</option><option value="document.summarization">Document summarization</option><option value="career.chatbot">Career coach chatbot</option><option value="cover.letter">Cover letter writer</option><option value="interview.prep">Interview preparation</option></select></label>
+        <label>Notes or source material<textarea id="input" rows="7">Software engineer with 5 years of experience building Node.js and React products. Led a migration that reduced API latency by 35%. Skilled in TypeScript, PostgreSQL, AWS, mentoring, and system design. Seeking a senior full-stack role.</textarea></label>
+        <button id="runFeature" class="primary">Generate with Gemini <span>↗</span></button>
+        <div class="divider"></div>
+        <div class="section-heading"><div><p class="eyebrow">02 · INJECT A PATTERN</p><h2>Leak scenarios</h2></div></div>
+        <label>Behavior to simulate<select id="scenario"><option value="duplicate">Duplicate prompt · 2 identical calls</option><option value="retry-loop">Retry loop · 5 rapid calls</option><option value="unbounded-context">Unbounded context · growing chat</option><option value="oversized-prompt">Oversized prompt · ~50k+ tokens</option><option value="spend-spike">Spend spike · baseline then burst</option></select></label>
+        <p id="scenarioHelp" class="help"></p><button id="runScenario" class="secondary">Run selected scenario <span>↗</span></button>
+        <p class="micro">Real Gemini API usage may incur charges. The oversized prompt is large by design; use a model that accepts the resulting context.</p>
+      </article>
+      <div class="right-col">
+        <article class="card metrics"><div class="section-heading"><div><p class="eyebrow">LIVE LEDGER</p><h2>Usage captured</h2></div><button id="refresh" class="quiet">Refresh</button></div><div class="metric-grid"><div><small>Requests</small><strong id="calls">0</strong></div><div><small>Total tokens</small><strong id="tokens">0</strong></div><div><small>Input tokens</small><strong id="inputTokens">0</strong></div><div><small>Output tokens</small><strong id="outputTokens">0</strong></div></div><div id="byFeature" class="feature-list"></div></article>
+        <article class="card result"><div class="section-heading"><div><p class="eyebrow">LATEST RESPONSE</p><h2>Gemini output</h2></div><span id="resultMeta" class="muted">Ready when you are</span></div><pre id="output">Choose a feature or leak scenario to begin.</pre></article>
+      </div>
+    </section>
+    <section class="card event-card"><div class="section-heading"><div><p class="eyebrow">INSTRUMENTATION</p><h2>Recent usage events</h2></div><span class="muted">Prompt text is not sent to ACLP</span></div><div class="table-wrap"><table><thead><tr><th>Feature</th><th>Model</th><th>Input</th><th>Output</th><th>Status</th><th>Ingestion</th></tr></thead><tbody id="events"><tr><td colspan="6" class="empty">No events yet.</td></tr></tbody></table></div></section>
+    <footer>Demo app · Uses your own Gemini key · ACLP receives metadata only</footer>
+  </main><script src="/app.js" type="module"></script>
+</body></html>
