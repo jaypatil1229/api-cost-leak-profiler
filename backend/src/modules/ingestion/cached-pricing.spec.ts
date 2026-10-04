@@ -1,0 +1,37 @@
+import { CostStatus, Prisma } from '@prisma/client';
+
+import { IngestionService } from './ingestion.service';
+
+describe('IngestionService cached input pricing', () => {
+  const calculateCost = (Object.create(IngestionService.prototype) as any).calculateCost;
+
+  it('prices cached and uncached input tokens once at their respective rates', () => {
+    const result = calculateCost(
+      { inputTokens: 100, cachedInputTokens: 40, outputTokens: 20 },
+      {
+        inputRatePerMillionTokens: new Prisma.Decimal('2'),
+        outputRatePerMillionTokens: new Prisma.Decimal('10'),
+        cachedInputRatePerMillionTokens: new Prisma.Decimal('1'),
+      },
+    );
+
+    expect(result.input.eq(new Prisma.Decimal('0.00016'))).toBe(true);
+    expect(result.output.eq(new Prisma.Decimal('0.0002'))).toBe(true);
+    expect(result.total.eq(new Prisma.Decimal('0.00036'))).toBe(true);
+    expect(result.status).toBe(CostStatus.CALCULATED);
+  });
+
+  it('uses the regular input rate when no cached rate is configured', () => {
+    const result = calculateCost(
+      { inputTokens: 100, cachedInputTokens: 40, outputTokens: 20 },
+      {
+        inputRatePerMillionTokens: new Prisma.Decimal('2'),
+        outputRatePerMillionTokens: new Prisma.Decimal('10'),
+        cachedInputRatePerMillionTokens: null,
+      },
+    );
+
+    expect(result.input.eq(new Prisma.Decimal('0.0002'))).toBe(true);
+    expect(result.total.eq(new Prisma.Decimal('0.0004'))).toBe(true);
+  });
+});

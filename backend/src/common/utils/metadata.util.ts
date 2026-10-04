@@ -10,7 +10,7 @@ import {
  * and in customer-visible reports.
  */
 const BLOCKED_KEY_PATTERN =
-  /(api[-_]?key|secret|password|passwd|authorization|auth[-_]?token|access[-_]?token|refresh[-_]?token|bearer|credential|private[-_]?key|session[-_]?token|cookie)/i;
+  /(api[-_]?key|secret|password|passwd|authorization|(^|[-_])token($|[-_])|auth[-_]?token|access[-_]?token|refresh[-_]?token|bearer|credential|private[-_]?key|session[-_]?token|cookie)/i;
 
 /**
  * Keys that would smuggle raw prompt/completion text into metadata. ACLP stores

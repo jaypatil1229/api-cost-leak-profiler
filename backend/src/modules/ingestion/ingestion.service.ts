@@ -298,17 +298,16 @@ export class IngestionService {
     total: Prisma.Decimal | null;
     status: CostStatus;
   } {
-    const inputCost = costForTokens(event.inputTokens, pricing.inputRatePerMillionTokens);
+    const cachedTokenCount = pricing.cachedInputRatePerMillionTokens
+      ? Math.min(event.cachedInputTokens ?? 0, event.inputTokens)
+      : 0;
+    const uncachedInputTokens = event.inputTokens - cachedTokenCount;
+    const cachedCost = cachedTokenCount > 0 && pricing.cachedInputRatePerMillionTokens
+      ? costForTokens(cachedTokenCount, pricing.cachedInputRatePerMillionTokens)
+      : new Prisma.Decimal(0);
+    const inputCost = costForTokens(uncachedInputTokens, pricing.inputRatePerMillionTokens).plus(cachedCost);
     const outputCost = costForTokens(event.outputTokens, pricing.outputRatePerMillionTokens);
-
-    let cachedCost: Prisma.Decimal | null = null;
-    if (event.cachedInputTokens && pricing.cachedInputRatePerMillionTokens) {
-      cachedCost = costForTokens(event.cachedInputTokens, pricing.cachedInputRatePerMillionTokens);
-    }
-
-    const totalCost = cachedCost
-      ? inputCost.plus(outputCost).plus(cachedCost)
-      : inputCost.plus(outputCost);
+    const totalCost = inputCost.plus(outputCost);
 
     return {
       input: inputCost,
