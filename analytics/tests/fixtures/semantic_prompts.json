@@ -1,0 +1,11 @@
+[
+ {"id":"a1","group":"recursion","text":"Explain recursion in simple terms."},
+ {"id":"a2","group":"recursion","text":"Can you explain recursion simply?"},
+ {"id":"a3","group":"recursion","text":"Describe how recursive functions work."},
+ {"id":"b1","group":"pasta","text":"How do I make pasta from scratch?"},
+ {"id":"b2","group":"pasta","text":"What is a simple way to cook pasta?"},
+ {"id":"c1","group":"bicycle","text":"How can I repair a flat bicycle tire?"},
+ {"id":"c2","group":"related-different","text":"How does iteration differ from recursion?"},
+ {"id":"d1","group":"duplicate","text":"Explain recursion"},
+ {"id":"d2","group":"duplicate","text":"Explain recursion"}
+]
