@@ -1,0 +1,14 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aclp_test
+      POSTGRES_PASSWORD: ${ACLP_TEST_POSTGRES_PASSWORD:?Set this in backend/.env.test}
+      POSTGRES_DB: aclp_test
+    ports:
+      - '127.0.0.1:55432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aclp_test -d aclp_test']
+      interval: 2s
+      timeout: 3s
+      retries: 30

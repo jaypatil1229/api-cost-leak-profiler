@@ -6,39 +6,44 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PrototypeNotice } from "./auth-shell";
+import { useSession } from "@/components/auth/session-provider";
 
 const schema = z.object({
   email: z.string().email("Enter a valid email address."),
-  password: z.string().min(8, "Password must be at least 8 characters."),
+  password: z.string().min(1, "Enter your password."),
 });
 
 type Values = z.infer<typeof schema>;
 
 export function SignInForm() {
   const router = useRouter();
+  const { login } = useSession();
   const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const form = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { email: "asha@northwind.example", password: "demo-password" },
+    defaultValues: { email: "", password: "" },
   });
 
-  function onSubmit() {
+  async function onSubmit(values: Values) {
     setPending(true);
-    toast.success("Signed in to the sample workspace", {
-      description: "No credential was verified. This prototype has no accounts.",
-    });
-    window.setTimeout(() => router.push("/overview"), 300);
+    setError(null);
+    try {
+      await login(values.email, values.password);
+      const next = new URLSearchParams(window.location.search).get("next");
+      router.replace(next?.startsWith("/") && !next.startsWith("//") ? next : "/overview");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to sign in.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
     <div className="flex flex-col gap-6">
-      <PrototypeNotice />
-
       <form className="flex flex-col gap-4" onSubmit={form.handleSubmit(onSubmit)} noValidate>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="sign-in-email">Work email</Label>
@@ -57,6 +62,7 @@ export function SignInForm() {
           {form.formState.errors.password ? <p className="text-xs text-destructive">{form.formState.errors.password.message}</p> : null}
         </div>
 
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         <Button type="submit" className="mt-2" disabled={pending}>
           {pending ? "Signing in…" : "Sign in"}
         </Button>

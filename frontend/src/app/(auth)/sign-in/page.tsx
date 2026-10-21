@@ -9,7 +9,7 @@ export default function SignInPage() {
   return (
     <AuthShell
       title="Sign in to ACLP"
-      description="Open the sample workspace to explore cost attribution, trends, and leak detection."
+      description="Use your ACLP account to review usage, costs, findings, and alerts for your organization."
       footer={
         <span>
           Looking for the product story first?{" "}

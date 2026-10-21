@@ -8,8 +8,7 @@ export default function ForgotPasswordPage() {
   return (
     <AuthShell
       title="Reset your password"
-      description="Enter the email you would use and ACLP will show the confirmation state."
-      footer={<span>Password recovery is simulated and does not send email.</span>}
+      description="Password recovery is currently unavailable."
     >
       <ForgotPasswordForm />
     </AuthShell>

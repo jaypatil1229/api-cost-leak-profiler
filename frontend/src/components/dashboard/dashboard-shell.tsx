@@ -39,9 +39,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateRangeSelector } from "@/components/shared/date-range-selector";
 import { DASHBOARD_NAV, type NavItem } from "@/lib/constants";
-import { CURRENT_USER } from "@/lib/mock-data/organization";
-import { useProject } from "@/hooks/use-project";
+import { useWorkspace } from "@/components/dashboard/workspace-provider";
+import { useSession } from "@/components/auth/session-provider";
 import { useAlerts } from "./alerts-provider";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const ICONS: Record<NavItem["icon"], React.ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>> = {
@@ -110,10 +111,11 @@ function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: 
 }
 
 function ProjectSelector({ collapsed }: { collapsed?: boolean }) {
-  const { project, projectId, setProject, projects } = useProject();
+  const { organization, organizations, setOrganizationId, project, setProjectId, projects } = useWorkspace();
   return (
     <div className={cn("px-3 pt-3", collapsed && "px-2")}>
-      <Select value={projectId} onValueChange={setProject}>
+      {organizations.length > 1 && !collapsed ? <Select value={organization?.id ?? ""} onValueChange={setOrganizationId}><SelectTrigger aria-label="Select organization" className="mb-2 h-9 w-full border-sidebar-border bg-background/70 text-sm"><SelectValue placeholder="Select organization" /></SelectTrigger><SelectContent><SelectGroup>{organizations.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select> : null}
+      {project ? <Select value={project.id} onValueChange={setProjectId}>
         <SelectTrigger
           aria-label="Select project"
           className={cn("h-10 w-full justify-between border-sidebar-border bg-background/70 text-sm", collapsed && "h-9 justify-center px-0")}
@@ -129,33 +131,37 @@ function ProjectSelector({ collapsed }: { collapsed?: boolean }) {
             ))}
           </SelectGroup>
         </SelectContent>
-      </Select>
+      </Select> : <p className="px-2 py-2 text-xs text-muted-foreground">{projects.length ? "Select a project" : "No projects available"}</p>}
       <p className={cn("mt-2 px-1 font-mono text-[0.65rem] text-muted-foreground", collapsed && "sr-only")}>
-        {project.organizationId.replace("org_", "")} · sample workspace
+        {organization?.name ?? "No organization selected"}
       </p>
     </div>
   );
 }
 
 function UserMenu() {
+  const { user, logout } = useSession();
+  const { organization } = useWorkspace();
+  const router = useRouter();
+  const initials = user?.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase() ?? "U";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-auto w-full justify-start gap-3 px-2 py-2">
           <Avatar className="size-8">
-            <AvatarFallback className="bg-accent text-xs font-medium text-accent-foreground">{CURRENT_USER.initials}</AvatarFallback>
+            <AvatarFallback className="bg-accent text-xs font-medium text-accent-foreground">{initials}</AvatarFallback>
           </Avatar>
           <span className="flex min-w-0 flex-col items-start">
-            <span className="truncate text-sm font-medium">{CURRENT_USER.name}</span>
-            <span className="truncate text-xs text-muted-foreground">{CURRENT_USER.title}</span>
+            <span className="truncate text-sm font-medium">{user?.name}</span>
+            <span className="truncate text-xs text-muted-foreground">{user?.email}</span>
           </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-60">
         <DropdownMenuLabel>
           <span className="flex flex-col gap-0.5">
-            <span>{CURRENT_USER.email}</span>
-            <span className="font-mono text-xs font-normal text-muted-foreground">role: {CURRENT_USER.role}</span>
+            <span>{user?.email}</span>
+            <span className="font-mono text-xs font-normal text-muted-foreground">role: {organization?.role ?? "member"}</span>
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -175,10 +181,10 @@ function UserMenu() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link href="/">
+          <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void logout().finally(() => router.replace("/sign-in")); }}>
             <LogOutIcon aria-hidden="true" />
-            Back to marketing site
-          </Link>
+            Sign out
+          </DropdownMenuItem>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -186,8 +192,8 @@ function UserMenu() {
 }
 
 function NotificationsMenu() {
-  const { alerts, counts } = useAlerts();
-  const recent = alerts.filter((alert) => alert.status !== "resolved").slice(0, 4);
+  const { alerts, counts, error } = useAlerts();
+  const recent = alerts.filter((alert) => alert.status !== "RESOLVED").slice(0, 4);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -206,14 +212,16 @@ function NotificationsMenu() {
           <span className="font-mono text-xs font-normal text-muted-foreground">{counts.active} active</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {recent.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm text-muted-foreground">No open alerts in this sample workspace.</p>
+        {error ? (
+          <p role="alert" className="px-3 py-6 text-center text-sm text-destructive">Alerts could not be loaded.</p>
+        ) : recent.length === 0 ? (
+          <p className="px-3 py-6 text-center text-sm text-muted-foreground">No open alerts in this workspace.</p>
         ) : (
           recent.map((alert) => (
             <DropdownMenuItem key={alert.id} asChild>
               <Link href={`/alerts?highlight=${alert.id}`} className="flex flex-col items-start gap-1 py-2.5">
                 <span className="text-sm font-medium">{alert.title}</span>
-                <span className="line-clamp-2 text-xs text-muted-foreground">{alert.description}</span>
+                <span className="line-clamp-2 text-xs text-muted-foreground">{alert.message}</span>
               </Link>
             </DropdownMenuItem>
           ))
@@ -234,6 +242,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const current =
     DASHBOARD_NAV.flatMap((group) => group.items).find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))?.label ??
     "Workspace";
+  const { organization, project } = useWorkspace();
+  const { user } = useSession();
+  const userInitials = user?.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase() ?? "U";
 
   return (
     <div className="flex min-h-svh bg-background">
@@ -261,7 +272,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           {collapsed ? (
             <div className="flex flex-col items-center gap-2">
               <Avatar className="size-8">
-                <AvatarFallback className="bg-accent text-xs font-medium text-accent-foreground">{CURRENT_USER.initials}</AvatarFallback>
+              <AvatarFallback className="bg-accent text-xs font-medium text-accent-foreground">{userInitials}</AvatarFallback>
               </Avatar>
               <ThemeToggleCompact />
             </div>
@@ -300,7 +311,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               </Sheet>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{current}</p>
-                <p className="hidden truncate text-xs text-muted-foreground sm:block">Northwind Labs · sample workspace</p>
+                <p className="hidden truncate text-xs text-muted-foreground sm:block">{organization?.name ?? "No organization"} · {project?.name ?? "No project"}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">

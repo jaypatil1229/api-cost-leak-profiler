@@ -1,7 +1,7 @@
-import { TrendsView } from "@/components/dashboard/trends-view";
+import { TrendsApiView } from "@/components/dashboard/real-data-views";
 
 export const metadata = { title: "Trends" };
 
 export default function TrendsPage() {
-  return <TrendsView />;
+  return <TrendsApiView />;
 }

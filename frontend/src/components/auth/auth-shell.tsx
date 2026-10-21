@@ -1,14 +1,6 @@
 import * as React from "react";
 import { BrandMark } from "@/components/shared/brand-mark";
-import { SampleDataNotice } from "@/components/shared/empty-state";
 
-export function PrototypeNotice() {
-  return (
-    <SampleDataNotice>
-      Simulated authentication. No account is created, no email is sent, and no credential leaves your browser.
-    </SampleDataNotice>
-  );
-}
 
 export function AuthShell({
   title,
@@ -39,7 +31,7 @@ export function AuthShell({
             </li>
           </ul>
         </div>
-        <p className="text-xs text-muted-foreground">Prototype build · sample data only</p>
+        <p className="text-xs text-muted-foreground">Secure access to your ACLP workspace.</p>
       </aside>
 
       <main id="main-content" className="flex flex-col gap-8 px-6 py-10 sm:px-10 lg:justify-center">

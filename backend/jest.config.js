@@ -1,6 +1,7 @@
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
   rootDir: '.',
+  testTimeout: 30000,
   projects: [
     {
       displayName: 'unit',
@@ -32,8 +33,7 @@ module.exports = {
       transform: {
         '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json', isolatedModules: true }],
       },
-      setupFilesAfterEnv: ['<rootDir>/test/setup-integration.ts'],
-      testTimeout: 30000,
+      setupFilesAfterEnv: ['<rootDir>/test/integration-setup.ts'],
     },
   ],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.module.ts', '!src/main.ts', '!src/**/*.dto.ts'],

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { MembershipStatus, OrgRole, OrganizationStatus } from '@prisma/client';
+import { MembershipStatus, OrgRole, OrganizationStatus, UserStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 
 import { AuditAction } from '../../common/constants/audit-actions';
@@ -195,6 +195,12 @@ export class AuthService {
         ErrorCode.INVALID_CREDENTIALS,
       );
     }
+    if (user.status === UserStatus.SUSPENDED) {
+      throw new UnauthorizedAppException('Your account has been suspended.');
+    }
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedAppException('Your account is not active.');
+    }
 
     const now = new Date();
     const familyId = randomUUID();
@@ -283,6 +289,14 @@ export class AuthService {
     });
     if (!user) {
       throw new UnauthorizedAppException('Refresh token is invalid.', ErrorCode.TOKEN_INVALID);
+    }
+    if (user.status !== UserStatus.ACTIVE) {
+      await this.revokeFamily(existing.familyId, 'account_inactive');
+      throw new UnauthorizedAppException(
+        user.status === UserStatus.SUSPENDED
+          ? 'Your account has been suspended.'
+          : 'Your account is not active.',
+      );
     }
 
     const issued = this.tokens.issueRefreshToken(now);

@@ -1,7 +1,7 @@
-import { OrganizationSettingsView } from "@/components/dashboard/organization-settings-view";
+import { OrganizationApiView } from "@/components/dashboard/real-data-views";
 
 export const metadata = { title: "Organization settings" };
 
 export default function OrganizationSettingsPage() {
-  return <OrganizationSettingsView />;
+  return <OrganizationApiView />;
 }

@@ -3,6 +3,7 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { DetectionController } from './detection.controller';
 import { AlertsController } from './alerts.controller';
 import { DetectionService } from './detection.service';
+import { AnalyticsClient } from './analytics.client';
 import { AlertsService } from './alerts.service';
 import {
   DetectorRegistry,
@@ -27,7 +28,7 @@ const DETECTORS = [
 
 @Module({
   controllers: [DetectionController, AlertsController],
-  providers: [DetectionService, AlertsService, DetectorRegistry, ...DETECTORS],
+  providers: [DetectionService, AlertsService, DetectorRegistry, AnalyticsClient, ...DETECTORS],
   exports: [DetectionService, AlertsService, DetectorRegistry],
 })
 export class DetectionModule implements OnModuleInit {

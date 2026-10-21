@@ -7,6 +7,8 @@ import { LoggerModule } from 'nestjs-pino';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { CommonModule } from './common/common.module';
+import { OrganizationContextGuard } from './common/guards/organization-context.guard';
+import { ProjectScopeGuard } from './common/guards/project-scope.guard';
 import { StrictRateLimitGuard } from './common/guards/strict-rate-limit.guard';
 import { OrganizationContextGuard } from './common/guards/organization-context.guard';
 import { ProjectScopeGuard } from './common/guards/project-scope.guard';

@@ -11,11 +11,7 @@ import { APP_CONFIG } from '../../config/config.module';
 import type { Configuration } from '../../config/configuration';
 import { PrismaService } from '../../database/prisma.service';
 
-import type {
-  AlertQueryDto,
-  AlertResponseDto,
-  UpdateAlertStatusDto,
-} from './dto/detection.dto';
+import type { AlertQueryDto, AlertResponseDto, UpdateAlertStatusDto } from './dto/detection.dto';
 
 @Injectable()
 export class AlertsService {
@@ -38,21 +34,45 @@ export class AlertsService {
       estimatedRecoverableCost: Prisma.Decimal | null;
     },
   ): Promise<void> {
-    await this.prisma.alert.create({
-      data: {
+    const created = await this.prisma.$transaction(async (tx) => {
+      const persistedFinding = await tx.detectionFinding.findFirst({
+        where: { id: finding.id, organizationId, projectId: finding.projectId },
+        select: { id: true },
+      });
+      if (!persistedFinding) throw new NotFoundAppException('Finding', finding.id);
+
+      const alertData = {
         organizationId,
         projectId: finding.projectId,
         findingId: finding.id,
-        category: 'COST_LEAK',
+        category: 'COST_LEAK' as const,
         severity: finding.severity,
         title: finding.title,
         message: finding.description,
         evidence: finding.evidence as Prisma.InputJsonValue,
         estimatedRecoverableCost: finding.estimatedRecoverableCost,
-        status: 'OPEN',
-      },
+      };
+      const inserted = await tx.alert.createMany({ data: [alertData], skipDuplicates: true });
+      await tx.alert.upsert({
+        where: { findingId: finding.id },
+        create: { ...alertData, status: 'OPEN' },
+        // Refresh detector content while preserving acknowledgement, dismissal,
+        // resolution, and original creation time.
+        update: {
+          organizationId: alertData.organizationId,
+          projectId: alertData.projectId,
+          category: alertData.category,
+          severity: alertData.severity,
+          title: alertData.title,
+          message: alertData.message,
+          evidence: alertData.evidence,
+          estimatedRecoverableCost: alertData.estimatedRecoverableCost,
+        },
+      });
+      return inserted.count === 1;
     });
-    this.logger.log(`Alert created for finding ${finding.id} in org ${organizationId}`);
+    if (created)
+      this.logger.log(`Alert created for finding ${finding.id} in org ${organizationId}`);
   }
 
   async listAlerts(
@@ -132,12 +152,17 @@ function mapAlertToDto(alert: any): AlertResponseDto {
     title: alert.title,
     message: alert.message,
     evidence: alert.evidence ?? null,
-    estimatedRecoverableCost:
-      alert.estimatedRecoverableCost?.toString() ?? null,
+    estimatedRecoverableCost: alert.estimatedRecoverableCost?.toString() ?? null,
     status: alert.status,
-    acknowledgedAt: alert.acknowledgedAt instanceof Date ? alert.acknowledgedAt.toISOString() : (alert.acknowledgedAt ?? null),
+    acknowledgedAt:
+      alert.acknowledgedAt instanceof Date
+        ? alert.acknowledgedAt.toISOString()
+        : (alert.acknowledgedAt ?? null),
     acknowledgedByUserId: alert.acknowledgedByUserId ?? null,
-    resolvedAt: alert.resolvedAt instanceof Date ? alert.resolvedAt.toISOString() : (alert.resolvedAt ?? null),
+    resolvedAt:
+      alert.resolvedAt instanceof Date
+        ? alert.resolvedAt.toISOString()
+        : (alert.resolvedAt ?? null),
     resolvedByUserId: alert.resolvedByUserId ?? null,
     createdAt: alert.createdAt instanceof Date ? alert.createdAt.toISOString() : alert.createdAt,
     updatedAt: alert.updatedAt instanceof Date ? alert.updatedAt.toISOString() : alert.updatedAt,

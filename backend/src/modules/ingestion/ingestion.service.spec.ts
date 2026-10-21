@@ -1,21 +1,29 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CostStatus, Prisma, Provider, UsageOutcome } from '@prisma/client';
+import { CallStatus, CostStatus, Prisma, Provider } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 import { APP_CONFIG } from '../../config/config.module';
-import { ConflictAppException } from '../../common/exceptions/app.exception';
-
 import { IngestionService } from './ingestion.service';
 
 describe('IngestionService', () => {
   let service: IngestionService;
-  let prisma: jest.Mocked<PrismaService>;
-
-  const mockConfig = {
-    limits: {
-      maxBatchSize: 100,
-    },
+  type IngestionPrismaMock = {
+    usageRecord: { create: jest.Mock; findUnique: jest.Mock };
+    modelPricing: { findFirst: jest.Mock };
+    ingestionBatch: { create: jest.Mock; update: jest.Mock };
   };
+  let prisma: IngestionPrismaMock;
+
+  const makeEvent = (eventId = 'evt-123') => ({
+    eventId,
+    provider: Provider.OPENAI,
+    model: 'gpt-4',
+    occurredAt: new Date().toISOString(),
+    inputTokens: 1000,
+    outputTokens: 500,
+    totalTokens: 1500,
+    status: CallStatus.SUCCESS,
+  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -24,228 +32,126 @@ describe('IngestionService', () => {
         {
           provide: PrismaService,
           useValue: {
-            usageRecord: {
-              create: jest.fn(),
-              findUnique: jest.fn(),
-            },
-            pricing: {
-              findFirst: jest.fn(),
-            },
-            $transaction: jest.fn((fn) => fn(prisma)),
+            usageRecord: { create: jest.fn(), findUnique: jest.fn() },
+            modelPricing: { findFirst: jest.fn() },
+            ingestionBatch: { create: jest.fn(), update: jest.fn() },
           },
         },
-        {
-          provide: APP_CONFIG,
-          useValue: mockConfig,
-        },
+        { provide: APP_CONFIG, useValue: { limits: {} } },
       ],
     }).compile();
 
     service = module.get<IngestionService>(IngestionService);
-    prisma = module.get(PrismaService) as jest.Mocked<PrismaService>;
+    prisma = module.get<IngestionPrismaMock>(PrismaService);
+    prisma.usageRecord.findUnique.mockResolvedValue(null);
+    prisma.usageRecord.create.mockResolvedValue({ id: 'usage-1' });
+    prisma.modelPricing.findFirst.mockResolvedValue({
+      id: 'pricing-1',
+      version: 'test-v1',
+      inputRatePerMillionTokens: new Prisma.Decimal('30'),
+      outputRatePerMillionTokens: new Prisma.Decimal('60'),
+      cachedInputRatePerMillionTokens: null,
+    });
   });
 
-  describe('ingestUsageEvent', () => {
-    it('should create usage record with estimated cost', async () => {
-      const event = {
-        sdkEventId: 'evt-123',
-        provider: Provider.OPENAI,
-        model: 'gpt-4',
-        inputTokens: 1000,
-        outputTokens: 500,
-        totalTokens: 1500,
-        occurredAt: new Date(),
-        outcome: UsageOutcome.SUCCESS,
-      };
+  const singleInput = (event = makeEvent()) => ({
+    organizationId: 'org-1',
+    projectId: 'project-1',
+    apiKeyId: 'key-1',
+    event,
+  });
 
-      const mockPricing = {
-        id: 'price-1',
-        provider: Provider.OPENAI,
-        model: 'gpt-4',
-        inputPricePerMillion: new Prisma.Decimal('30.00'),
-        outputPricePerMillion: new Prisma.Decimal('60.00'),
-        effectiveFrom: new Date('2026-01-01'),
-        effectiveTo: null,
-      };
+  it('persists a usage event with a Decimal cost estimate', async () => {
+    const result = await service.ingestSingle(singleInput());
 
-      prisma.usageRecord.findUnique.mockResolvedValue(null);
-      prisma.pricing.findFirst.mockResolvedValue(mockPricing as any);
-      prisma.usageRecord.create.mockResolvedValue({
-        id: 'record-1',
-        ...event,
+    expect(result).toEqual({ eventId: 'evt-123', status: 'accepted', usageRecordId: 'usage-1' });
+    const { data } = prisma.usageRecord.create.mock.calls[0][0];
+    expect(data).toEqual(
+      expect.objectContaining({
+        organizationId: 'org-1',
+        projectId: 'project-1',
+        eventId: 'evt-123',
+        apiKeyId: 'key-1',
         estimatedInputCost: new Prisma.Decimal('0.03'),
         estimatedOutputCost: new Prisma.Decimal('0.03'),
         estimatedTotalCost: new Prisma.Decimal('0.06'),
         costStatus: CostStatus.CALCULATED,
-      } as any);
-
-      const result = await service.ingestUsageEvent({
-        organizationId: 'org-1',
-        projectId: 'proj-1',
-        event,
-      });
-
-      expect(result.costStatus).toBe(CostStatus.CALCULATED);
-      expect(prisma.usageRecord.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            sdkEventId: event.sdkEventId,
-            estimatedInputCost: expect.any(Prisma.Decimal),
-            estimatedOutputCost: expect.any(Prisma.Decimal),
-            estimatedTotalCost: expect.any(Prisma.Decimal),
-            costStatus: CostStatus.CALCULATED,
-          }),
-        }),
-      );
-    });
-
-    it('should enforce idempotency', async () => {
-      const existingRecord = {
-        id: 'record-1',
-        sdkEventId: 'evt-123',
-      };
-
-      prisma.usageRecord.findUnique.mockResolvedValue(existingRecord as any);
-
-      await expect(
-        service.ingestUsageEvent({
-          organizationId: 'org-1',
-          projectId: 'proj-1',
-          event: {
-            sdkEventId: 'evt-123',
-            provider: Provider.OPENAI,
-            model: 'gpt-4',
-            inputTokens: 1000,
-            outputTokens: 500,
-            totalTokens: 1500,
-            occurredAt: new Date(),
-            outcome: UsageOutcome.SUCCESS,
-          },
-        }),
-      ).rejects.toThrow(ConflictAppException);
-    });
-
-    it('should mark cost as PENDING_PRICING when no pricing found', async () => {
-      prisma.usageRecord.findUnique.mockResolvedValue(null);
-      prisma.pricing.findFirst.mockResolvedValue(null);
-      prisma.usageRecord.create.mockResolvedValue({
-        id: 'record-1',
-        costStatus: CostStatus.PENDING_PRICING,
-      } as any);
-
-      const result = await service.ingestUsageEvent({
-        organizationId: 'org-1',
-        projectId: 'proj-1',
-        event: {
-          sdkEventId: 'evt-123',
-          provider: Provider.OPENAI,
-          model: 'unknown-model',
-          inputTokens: 1000,
-          outputTokens: 500,
-          totalTokens: 1500,
-          occurredAt: new Date(),
-          outcome: UsageOutcome.SUCCESS,
-        },
-      });
-
-      expect(result.costStatus).toBe(CostStatus.PENDING_PRICING);
-    });
+      }),
+    );
   });
 
-  describe('ingestBatch', () => {
-    it('should process all events and return per-event results', async () => {
-      const events = [
-        {
-          sdkEventId: 'evt-1',
-          provider: Provider.OPENAI,
-          model: 'gpt-4',
-          inputTokens: 100,
-          outputTokens: 50,
-          totalTokens: 150,
-          occurredAt: new Date(),
-          outcome: UsageOutcome.SUCCESS,
-        },
-        {
-          sdkEventId: 'evt-2',
-          provider: Provider.GEMINI,
-          model: 'gemini-pro',
-          inputTokens: 200,
-          outputTokens: 100,
-          totalTokens: 300,
-          occurredAt: new Date(),
-          outcome: UsageOutcome.SUCCESS,
-        },
-      ];
+  it('returns a duplicate outcome for an event already persisted in the project', async () => {
+    prisma.usageRecord.findUnique.mockResolvedValue({ id: 'existing-usage' });
 
-      prisma.usageRecord.findUnique.mockResolvedValue(null);
-      prisma.pricing.findFirst.mockResolvedValue({
-        inputPricePerMillion: new Prisma.Decimal('10.00'),
-        outputPricePerMillion: new Prisma.Decimal('20.00'),
-      } as any);
-      prisma.usageRecord.create.mockResolvedValue({
-        id: 'record-1',
-        costStatus: CostStatus.CALCULATED,
-      } as any);
+    const result = await service.ingestSingle(singleInput());
 
-      const result = await service.ingestBatch({
-        organizationId: 'org-1',
-        projectId: 'proj-1',
-        events,
-      });
+    expect(result).toEqual({
+      eventId: 'evt-123',
+      status: 'duplicate',
+      usageRecordId: 'existing-usage',
+    });
+    expect(prisma.modelPricing.findFirst).not.toHaveBeenCalled();
+    expect(prisma.usageRecord.create).not.toHaveBeenCalled();
+  });
 
-      expect(result.totalEvents).toBe(2);
-      expect(result.successCount).toBe(2);
-      expect(result.failureCount).toBe(0);
-      expect(result.results).toHaveLength(2);
-      expect(result.results[0].success).toBe(true);
+  it('keeps missing pricing explicit instead of recording zero cost', async () => {
+    prisma.modelPricing.findFirst.mockResolvedValue(null);
+
+    const result = await service.ingestSingle(singleInput(makeEvent('evt-unpriced')));
+
+    expect(result.status).toBe('accepted');
+    expect(prisma.usageRecord.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          costStatus: CostStatus.PENDING_PRICING,
+          estimatedInputCost: null,
+          estimatedOutputCost: null,
+          estimatedTotalCost: null,
+        }),
+      }),
+    );
+  });
+
+  it('reports accepted and duplicate outcomes independently in a batch', async () => {
+    prisma.ingestionBatch.create.mockResolvedValue({ id: 'batch-1' });
+    prisma.usageRecord.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'usage-existing' });
+    const result = await service.ingestBatch({
+      organizationId: 'org-1',
+      projectId: 'project-1',
+      apiKeyId: 'key-1',
+      events: [makeEvent('evt-new'), makeEvent('evt-existing')],
     });
 
-    it('should continue processing on individual event failure', async () => {
-      const events = [
-        {
-          sdkEventId: 'evt-1',
-          provider: Provider.OPENAI,
-          model: 'gpt-4',
-          inputTokens: 100,
-          outputTokens: 50,
-          totalTokens: 150,
-          occurredAt: new Date(),
-          outcome: UsageOutcome.SUCCESS,
-        },
-        {
-          sdkEventId: 'evt-1',
-          provider: Provider.OPENAI,
-          model: 'gpt-4',
-          inputTokens: 100,
-          outputTokens: 50,
-          totalTokens: 150,
-          occurredAt: new Date(),
-          outcome: UsageOutcome.SUCCESS,
-        },
-      ];
+    expect(result).toEqual(
+      expect.objectContaining({
+        batchId: 'batch-1',
+        eventCount: 2,
+        acceptedCount: 1,
+        duplicateCount: 1,
+        rejectedCount: 0,
+        outcomes: [
+          expect.objectContaining({ eventId: 'evt-new', status: 'accepted' }),
+          expect.objectContaining({ eventId: 'evt-existing', status: 'duplicate' }),
+        ],
+      }),
+    );
+    expect(prisma.ingestionBatch.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'batch-1' },
+        data: expect.objectContaining({ acceptedCount: 1, duplicateCount: 1, rejectedCount: 0 }),
+      }),
+    );
+  });
 
-      prisma.usageRecord.findUnique
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ id: 'existing' } as any);
-      prisma.pricing.findFirst.mockResolvedValue({
-        inputPricePerMillion: new Prisma.Decimal('10.00'),
-        outputPricePerMillion: new Prisma.Decimal('20.00'),
-      } as any);
-      prisma.usageRecord.create.mockResolvedValue({
-        id: 'record-1',
-        costStatus: CostStatus.CALCULATED,
-      } as any);
+  it('rejects negative token counts without looking up pricing or persisting', async () => {
+    const event = { ...makeEvent(), inputTokens: -1 };
+    const result = await service.ingestSingle(singleInput(event));
 
-      const result = await service.ingestBatch({
-        organizationId: 'org-1',
-        projectId: 'proj-1',
-        events,
-      });
-
-      expect(result.totalEvents).toBe(2);
-      expect(result.successCount).toBe(1);
-      expect(result.failureCount).toBe(1);
-      expect(result.results[1].success).toBe(false);
-    });
+    expect(result.status).toBe('rejected');
+    expect(result.reason).toBe('Token counts cannot be negative.');
+    expect(prisma.modelPricing.findFirst).not.toHaveBeenCalled();
+    expect(prisma.usageRecord.create).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
-import { ReportsView } from "@/components/dashboard/reports-view";
+import { ReportsApiView } from "@/components/dashboard/real-data-views";
 
 export const metadata = { title: "Reports" };
 
 export default function ReportsPage() {
-  return <ReportsView />;
+  return <ReportsApiView />;
 }

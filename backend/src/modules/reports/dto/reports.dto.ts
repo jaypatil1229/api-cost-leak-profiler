@@ -76,15 +76,79 @@ export class SavedReportResponseDto {
   updatedAt!: string;
 }
 
+export class OverviewModelItemDto {
+  model!: string;
+  eventCount!: number;
+  totalCost!: string | null;
+}
+
+export class OverviewProviderItemDto {
+  provider!: string;
+  eventCount!: number;
+  totalCost!: string | null;
+}
+
+export class OverviewFeatureItemDto {
+  featureId!: string;
+  eventCount!: number;
+  totalCost!: string | null;
+}
+
+export class CostBreakdownItemDto {
+  model!: string;
+  totalCost!: string | null;
+  percentage!: number | null;
+}
+
+export class ProviderCostBreakdownItemDto {
+  provider!: string;
+  totalCost!: string | null;
+  percentage!: number | null;
+}
+
+export class FeatureCostBreakdownItemDto {
+  featureId!: string;
+  totalCost!: string | null;
+  percentage!: number | null;
+}
+
+export class UsageModelItemDto {
+  model!: string;
+  eventCount!: number;
+  totalTokens!: number;
+}
+
+export class UsageProviderItemDto {
+  provider!: string;
+  eventCount!: number;
+  totalTokens!: number;
+}
+
+export class UsageFeatureItemDto {
+  featureId!: string;
+  eventCount!: number;
+  totalTokens!: number;
+}
+
+export class FindingSeverityItemDto {
+  severity!: string;
+  count!: number;
+}
+
+export class FindingDetectorItemDto {
+  detectorType!: string;
+  count!: number;
+}
+
 export class OverviewReportDto {
   totalEvents!: number;
   totalCost!: string | null;
   totalInputTokens!: number;
   totalOutputTokens!: number;
   totalTokens!: number;
-  topModels!: Array<{ model: string; eventCount: number; totalCost: string | null }>;
-  topProviders!: Array<{ provider: string; eventCount: number; totalCost: string | null }>;
-  topFeatures!: Array<{ featureId: string; eventCount: number; totalCost: string | null }>;
+  topModels!: OverviewModelItemDto[];
+  topProviders!: OverviewProviderItemDto[];
+  topFeatures!: OverviewFeatureItemDto[];
   activeFindingsCount!: number;
   activeAlertsCount!: number;
   currency!: string;
@@ -92,9 +156,9 @@ export class OverviewReportDto {
 
 export class CostReportDto {
   totalCost!: string | null;
-  costByModel!: Array<{ model: string; totalCost: string | null; percentage: number | null }>;
-  costByProvider!: Array<{ provider: string; totalCost: string | null; percentage: number | null }>;
-  costByFeature!: Array<{ featureId: string; totalCost: string | null; percentage: number | null }>;
+  costByModel!: CostBreakdownItemDto[];
+  costByProvider!: ProviderCostBreakdownItemDto[];
+  costByFeature!: FeatureCostBreakdownItemDto[];
   currency!: string;
 }
 
@@ -103,17 +167,17 @@ export class UsageReportDto {
   totalInputTokens!: number;
   totalOutputTokens!: number;
   totalTokens!: number;
-  eventsByModel!: Array<{ model: string; eventCount: number; totalTokens: number }>;
-  eventsByProvider!: Array<{ provider: string; eventCount: number; totalTokens: number }>;
-  eventsByFeature!: Array<{ featureId: string; eventCount: number; totalTokens: number }>;
+  eventsByModel!: UsageModelItemDto[];
+  eventsByProvider!: UsageProviderItemDto[];
+  eventsByFeature!: UsageFeatureItemDto[];
 }
 
 export class DetectionsReportDto {
   totalFindings!: number;
   openFindings!: number;
   resolvedFindings!: number;
-  findingsBySeverity!: Array<{ severity: string; count: number }>;
-  findingsByDetector!: Array<{ detectorType: string; count: number }>;
+  findingsBySeverity!: FindingSeverityItemDto[];
+  findingsByDetector!: FindingDetectorItemDto[];
   totalAlerts!: number;
   activeAlerts!: number;
 }
