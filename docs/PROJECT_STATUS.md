@@ -1,28 +1,32 @@
 # ACLP Project Status
 
 **Status date:** 2026-10-21  
-**Scope:** Repository implementation and the reusable TypeScript telemetry SDK milestone.
+**Scope:** Current `main` branch after merge and the reusable TypeScript SDK milestone.
 
-This is a snapshot of the current source tree and the verification recorded in the repository documentation. The worktree contains many modified files and untracked implementation files, including all of `sdk/`; this report does not imply those changes have been committed, released, or deployed.
+## Current branch snapshot
 
-## Uncommitted worktree reviewed
+The current branch is `main` at merge commit `8dd76cb`, matching `origin/main`. Before this report was refreshed, there were no staged, unstaged, untracked, or unmerged paths. The integration work is committed; this report does not imply a production deployment or package release. The only current worktree change is this status-document update.
 
-The full current `git status` inventory was reviewed on 2026-10-21: **93 changed or untracked paths** (52 tracked modifications and 41 untracked files), spanning 36 backend, 41 frontend, 13 SDK, and 3 documentation paths. The tracked diff reports 1,018 insertions and 1,527 deletions. These are counts of Git paths, not a measure of completion. No changes were staged or committed during this review.
+### Integrated implementation
 
-### Current uncommitted implementation
+- **Backend:** authentication and API-key ingestion, tenant/project guards, usage/report APIs, cost estimates, advanced analytics client wiring, idempotent finding/alert persistence, Prisma migrations, and an isolated PostgreSQL integration-test runner.
+- **Analytics:** independent FastAPI service with semantic similarity and Isolation Forest detectors, bounded request sizes, test suite, and Docker setup.
+- **Frontend:** typed backend API client, refresh-token rotation and session restoration, organization/project workspace selection, API-backed dashboard views, and loading/error/empty states. The rotating refresh token remains in `sessionStorage`.
+- **SDK:** tracked `sdk/` package with explicit event submission and OpenAI/Gemini instrumentation adapters, bounded in-memory batching, retries, prompt hashing, metadata sanitization, shutdown/flush methods, examples, and tests.
+- **Gemini demo:** `sdk-test-app/` remains a separate example application; it is not the distributable SDK.
+- **Persistence and test tooling:** baseline and alert-uniqueness migrations, concurrent persistence tests, and loopback-only test database safeguards are committed.
 
-- **Backend:** fixes inactive-account login/refresh handling; wires API-key ingestion dependencies and global organization/project scope guards; adds the project filter to the usage date-range contract; adds named report DTO item schemas for Swagger; connects the advanced anomaly detector to the authenticated Python analytics client; makes finding and alert persistence idempotent while preserving lifecycle state; adds baseline and alert-uniqueness migrations, persistence tests, and a guarded isolated-PostgreSQL test runner.
-- **Frontend:** replaces sample-backed dashboard/auth flows with a typed backend API client, refresh-token rotation, session restoration, organization/project workspace selection, real API-backed dashboard views, and loading/error/empty states. It also adds API-client unit tests, live-backend browser coverage, and a Windows test-runtime workaround. The rotating refresh token remains in `sessionStorage`.
-- **SDK:** adds the untracked `sdk/` package, types, client, safe structured errors, documentation, mocked tests, an example, and an opt-in live integration test. The package is not published.
-- **Documentation/configuration:** adds or updates the roadmap, detection persistence guide, project status report, test environment templates, and package/runtime scripts.
+### Repository hygiene and security findings
 
-These changes are present in the worktree and have not been treated as committed or released product state.
+- `backend/.env.test` is tracked in commit `ed8dccc` even though it contains populated local test database credentials and is matched by the backend ignore rule. Remove it from version control and rotate the test database password. Do not print or commit its values.
+- `sdk-test-app/.env` was present in an earlier commit and was deleted in a later commit; a provider credential was present in the local file during review. If that key was real, revoke/rotate it. Deleting the file from the latest tree does not remove it from Git history; purge history if the repository is shared or public.
+- Generated `analytics/aclp_analytics.egg-info/` metadata is tracked. It is build output and generally should be regenerated rather than maintained as source.
 
 ## Executive summary
 
 ACLP has a substantial working application: a NestJS API with PostgreSQL persistence, authentication and tenant scoping, usage ingestion and reporting, a connected Next.js dashboard, a Python analytics service, and a reusable TypeScript telemetry SDK.
 
-The SDK is implemented and its build plus mocked unit suite pass. Current backend build and unit tests, and frontend lint/typecheck/unit tests, also pass in this review. Repository notes record successful live SDK ingestion, PostgreSQL integration, and frontend/backend verification on 2026-10-19; live services are not running and those integration checks were not repeated today. The project is not yet release-complete: the SDK has not been published, some product and operational work remains, semantic detection cannot analyze persisted prompts under the current privacy model, and a configured ingestion batch limit is not enforced by the ingestion path.
+Core backend, frontend, and analytics functionality is implemented, but the current SDK is not yet validated from the committed package state: its dependency lockfile is out of sync, and build/typecheck currently fail because package dependencies and Node typings are unavailable. Analytics tests passed in this review. Previous repository notes record live SDK ingestion, PostgreSQL integration, and frontend/backend acceptance on 2026-10-19, but those live checks were not rerun against the merged branch today. ACLP is not release-ready: credentials are present in Git history, SDK reliability/privacy issues need work, ingestion's configured batch limit is not enforced, and operational and product gaps remain.
 
 ## Work completed
 
@@ -33,7 +37,7 @@ The SDK is implemented and its build plus mocked unit suite pass. Current backen
 | Usage, cost, and reporting | Usage filtering and aggregation, timeseries and breakdown APIs, pricing lookups, overview and report APIs, and persisted detection findings and alerts. |
 | Detection and analytics | Five deterministic backend detectors and a separate FastAPI analytics service for Isolation Forest and semantic duplicate analysis. Detection persistence uses stable finding identity and database uniqueness; alert persistence is idempotent for linked findings. |
 | Frontend | Next.js dashboard routes are connected to the backend API, including session restoration/refresh, workspace selection, usage, findings, alerts, and reports. Loading, empty, and error states are implemented. |
-| TypeScript telemetry SDK | `sdk/` provides a typed CommonJS package with declarations, Node.js 20.11+ requirement, explicit event submission, bounded memory and batch processing, timeouts, bounded retries, safe diagnostics, event validation, metadata filtering, `flush()`, `close()`, and cancellation. |
+| TypeScript telemetry SDK | `sdk/` provides a typed CommonJS package targeting Node.js 18+, using Axios, explicit event submission, OpenAI/Gemini adapters, bounded in-memory batching, retries, metadata sanitization, and `flush()`/`shutdown()`. The committed lockfile is inconsistent with `package.json`, so the current SDK build/test state is not verified. |
 | Examples | The SDK has a local submission example that makes no provider call. `sdk-test-app/` is a separate Gemini demo that instruments requests after the provider call; it is not the distributable SDK. |
 | Documentation and test infrastructure | Project roadmap, detection persistence notes, SDK usage/security guide, backend and frontend setup guides, and isolated PostgreSQL integration-test setup are present. |
 
@@ -50,22 +54,21 @@ The current backend contract is defined by `backend/src/modules/ingestion/dto/in
 
 ## Verification status
 
-### Run during this review
+### Run during the current branch review
 
 | Check | Result |
 | --- | --- |
-| `cd sdk; npm test` | **Passed:** SDK TypeScript build completed and 10/10 mocked unit tests passed. Coverage includes ingestion contract/auth, network and 5xx retries, timeout, malformed response, queue and batch limits, close/flush, event rejection, and metadata redaction. |
-| `cd backend; npm run build` | **Passed.** |
-| `cd backend; npm run test:unit -- --runInBand --silent` | **Passed:** 10 suites, 63 tests. Jest emitted a deprecation warning that `ts-jest`'s `isolatedModules` option will be removed in v30. |
-| `cd frontend; npm run lint` | **Passed** with `--max-warnings=0`. |
-| `cd frontend; npm run typecheck` | **Passed.** |
-| `cd frontend; npm test` | **Passed:** 18 tests (4 API-client tests and 14 illustrative-ledger tests). |
-| `cd frontend; npm run build` | **Passed:** Next.js 16 production build completed and generated all listed routes. |
-| `git diff --check` | **Passed** for the tracked diff. |
+| `analytics\.venv\Scripts\python.exe -m pytest` | **Passed:** 43 tests, 1 Starlette deprecation warning. |
+| `cd sdk; npm test` | **Blocked:** Jest is not installed in the SDK dependency tree. |
+| `cd sdk; npm ci` | **Failed:** `package.json` and `package-lock.json` are out of sync; the lock is missing declared dependency entries including `ts-node` and transitive packages. |
+| `cd sdk; npm run build` | **Failed:** missing `axios` and Node.js type declarations in the local dependency tree. |
+| `cd sdk; npm run typecheck` | **Failed:** Node.js types and other dependencies unavailable; typecheck also includes examples/tests that require those dependencies. |
+| Backend build/unit and frontend lint/typecheck/unit/build | **Passed earlier on the implementation before it was merged** (backend: 10 suites/63 tests; frontend: 18 tests). They were not rerun after the merge commit. |
+| `git status` | **Clean:** `main` matches `origin/main`; no unmerged entries. |
 
 ### Previously recorded in repository documentation
 
-The following results are documented in `docs/IMPLEMENTATION_ROADMAP.md` and `docs/DETECTION_PERSISTENCE.md` as having run on 2026-10-19. They are included as historical evidence; the live/integration checks were not rerun for this report:
+The following results are documented in `docs/IMPLEMENTATION_ROADMAP.md` and `docs/DETECTION_PERSISTENCE.md` as having run on 2026-10-19. They are historical evidence only; the live/integration checks were not rerun for this report:
 
 | Check | Recorded result |
 | --- | --- |
@@ -84,10 +87,12 @@ The live environment was subsequently stopped and its isolated test container/ne
 
 ### Priority 1 — Close release and integration gaps
 
-1. **Enforce ingestion batch limits.** `INGEST_MAX_BATCH_SIZE` is validated and copied into backend configuration, but the current ingestion DTO/controller/service do not use it to cap `events`. The SDK defaults to 25 and allows up to 500. Wire the backend limit into request validation and test both the configured boundary and oversized requests; keep SDK documentation and defaults aligned with the effective server limit.
-2. **Publish and consume the SDK package.** Decide release/versioning and registry access, publish `@aclp/telemetry-sdk`, and verify installation from the published artifact. The current `npm install @aclp/telemetry-sdk` instruction is forward-looking; no publication is recorded.
-3. **Keep SDK/backend contracts synchronized.** There is no shared contracts package. Add a deliberate contract compatibility check or establish a shared package before independently evolving the duplicated DTO and enum definitions.
-4. **Repeat end-to-end acceptance from a clean environment.** Bring up the documented local backend/database/frontend setup, run migrations, and execute the SDK live test against it. Record exact current results before release.
+1. **Remove committed credentials and rotate them.** Remove `backend/.env.test` from the repository and history as appropriate, rotate its local database password, and revoke/rotate any provider key committed in the earlier `sdk-test-app/.env` history. Ensure only safe `.env.example` templates remain tracked.
+2. **Make the SDK reproducibly build and test.** Regenerate and verify the package lockfile against `package.json`; install from a clean environment; fix `build`, `typecheck`, and unit tests. Then correct SDK issues before release: avoid logging raw Axios/provider errors, never derive `errorCode` from arbitrary provider error messages, validate ingestion per-event outcomes, and surface rather than silently treating permanent 4xx/rejected events as delivered. Queue overflow currently drops old events with console warnings; provide a reliable documented failure signal.
+3. **Enforce ingestion batch limits.** `INGEST_MAX_BATCH_SIZE` is validated and copied into backend configuration, but the current ingestion DTO/controller/service do not use it to cap `events`. The SDK permits up to 500 events. Wire the backend limit into request validation and test both the configured boundary and oversized requests.
+4. **Keep SDK/backend contracts synchronized.** There is no shared contracts package. Add a deliberate contract compatibility check or establish a shared package before independently evolving the duplicated DTO and enum definitions.
+5. **Repeat end-to-end acceptance from a clean environment.** Bring up the documented local backend/database/frontend setup, run migrations, and execute the SDK live test against it. Record exact current results before release.
+6. **Publish and consume the SDK package.** Decide release/versioning and registry access, publish the package, and verify installation from the published artifact. Publication is not recorded or verified.
 
 ### Priority 2 — Finish product and operational readiness
 
@@ -95,7 +100,7 @@ The live environment was subsequently stopped and its isolated test container/ne
 2. Complete or explicitly defer frontend flows identified in `frontend/README.md`: password reset, invitations, API-key management in the UI, budget/pricing settings, and saved-report actions.
 3. Complete operations readiness: deployment automation, CI gates, production monitoring/alerting, backup/restore procedures, and production configuration/security review. The backend README has a production checklist, and the detection guide documents migrations and the isolated test database, but no CI workflow, production deployment runbook, monitoring/alerting setup, or backup/restore procedure is present in the repository. No production release is verified.
 4. Review session token storage and adoption of an HTTP-only, `Secure`, `SameSite` refresh-token cookie flow; the current frontend keeps a rotating refresh token in `sessionStorage`.
-5. Define durable telemetry delivery expectations for SDK consumers. The SDK reports failed events and removes them from its in-memory queue; applications that require delivery across process restarts must persist events and retry them themselves.
+5. Define durable telemetry delivery expectations for SDK consumers. The SDK retains some transiently failed batches in memory for a later flush, but the queue is not durable across process restarts; permanent client errors and queue overflow can discard events. Applications requiring durable delivery need persistent storage and an explicit retry policy.
 
 ### Priority 3 — Validate analytics quality and boundaries
 
@@ -105,14 +110,17 @@ The live environment was subsequently stopped and its isolated test container/ne
 
 ## Known constraints and cautions
 
-- The SDK does not proxy provider requests and does not include provider-specific adapters. Applications call their LLM provider directly and submit usage metadata afterward.
-- The SDK does not guarantee exactly-once delivery and does not retain failed events durably.
+- The SDK does not proxy provider requests; its OpenAI and Gemini adapters wrap provider calls and submit telemetry separately. Prompt/completion text should not be transmitted, but current provider-error handling can copy part of an exception message into `errorCode`; this must be fixed and retested before release.
+- The SDK does not guarantee exactly-once delivery. Its current client drops permanent 4xx batches and can drop old queued events on overflow; a successful HTTP status is not enough to establish that every event was accepted because the response outcomes are not validated.
 - The test application can make real Gemini calls and incur provider charges; the SDK unit and example tests do not call a paid provider.
 - Pricing is estimate-based and requires matching pricing data. Missing pricing can leave an accepted usage record pending pricing.
 - `backend/IMPLEMENTATION_STATUS.md` and parts of `backend/README.md` contain stale claims/examples that conflict with current code and newer dated roadmap notes. For example, the README still documents a 100-event batch limit and older ingestion field/auth examples, while current config defaults to 500 and the current DTO uses `eventId` plus a batch envelope. These files need a documentation refresh; use current source contracts and dated verification notes as the source of truth.
 
 ## Suggested completion checklist
 
+- [ ] Remove committed environment credentials, rotate them, and address any exposed keys in Git history.
+- [ ] Repair SDK dependency lockfile; pass clean install, build, typecheck, and tests.
+- [ ] Fix SDK credential/error logging, provider error-code handling, per-event response validation, rejected-event reporting, and queue-overflow behavior.
 - [ ] Enforce and test the backend batch-size configuration; align SDK limit guidance.
 - [ ] Re-run clean-environment backend, frontend, PostgreSQL, and SDK live acceptance checks.
 - [ ] Verify migration compatibility against representative populated legacy data.
