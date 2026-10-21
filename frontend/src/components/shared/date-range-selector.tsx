@@ -7,7 +7,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useUrlState } from "@/hooks/use-url-state";
-import { getDefaultRange, getLedgerBounds } from "@/lib/mock-services/repository";
 import { formatDateRange } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
@@ -19,16 +18,30 @@ export interface ResolvedRange {
   preset: string;
 }
 
+function dateString(date: Date) { return date.toISOString().slice(0, 10); }
+function getLiveBounds() {
+  const to = new Date();
+  const from = new Date(to);
+  from.setUTCDate(from.getUTCDate() - 90);
+  return { from: dateString(from), to: dateString(to) };
+}
+function getRange(days: number) {
+  const to = new Date();
+  const from = new Date(to);
+  from.setUTCDate(from.getUTCDate() - (days - 1));
+  return { from: dateString(from), to: dateString(to) };
+}
+
 export function resolveRange(get: (key: string) => string | undefined): ResolvedRange {
-  const bounds = getLedgerBounds();
+  const bounds = getLiveBounds();
   const preset = get("range") ?? "30d";
   if (preset === "custom") {
-    const from = get("from") ?? getDefaultRange(30).from;
+    const from = get("from") ?? getRange(30).from;
     const to = get("to") ?? bounds.to;
     return { from, to, granularity: "day", label: formatDateRange(from, to), preset };
   }
   const config = DATE_PRESETS.find((entry) => entry.value === preset) ?? DATE_PRESETS[1];
-  const range = getDefaultRange(config.days);
+  const range = getRange(config.days);
   return { from: range.from, to: range.to, granularity: config.granularity, label: config.label, preset: config.value };
 }
 
@@ -40,7 +53,7 @@ export function useDateRange(): ResolvedRange {
 export function DateRangeSelector({ className }: { className?: string }) {
   const { setParams } = useUrlState();
   const range = useDateRange();
-  const bounds = getLedgerBounds();
+  const bounds = getLiveBounds();
 
   return (
     <div className={cn("flex flex-col gap-2 sm:flex-row sm:items-center", className)}>

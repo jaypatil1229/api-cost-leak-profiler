@@ -6,48 +6,50 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PrototypeNotice } from "./auth-shell";
+import { useSession } from "@/components/auth/session-provider";
 
 const schema = z.object({
-  name: z.string().min(2, "Tell us what to call you."),
+  name: z.string().min(1, "Tell us what to call you."),
   organization: z.string().min(2, "Organization name needs at least 2 characters."),
   email: z.string().email("Enter a valid work email address."),
   password: z
     .string()
-    .min(8, "Use at least 8 characters.")
-    .regex(/[0-9]/, "Include at least one number."),
-  agree: z.boolean().refine((value) => value === true, "Confirm this is a prototype build to continue."),
+    .min(12, "Use at least 12 characters.")
+    .regex(/[A-Z]/, "Include an uppercase letter.")
+    .regex(/[a-z]/, "Include a lowercase letter.")
+    .regex(/[0-9]/, "Include a number."),
 });
 
 type Values = z.infer<typeof schema>;
 
 export function SignUpForm() {
   const router = useRouter();
+  const { register } = useSession();
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const form = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", organization: "", email: "", password: "", agree: false },
+    defaultValues: { name: "", organization: "", email: "", password: "" },
   });
-  const agree = form.watch("agree");
 
-  function onSubmit(values: Values) {
+  async function onSubmit(values: Values) {
+    setPending(true);
+    setError(null);
     try {
-      window.localStorage.setItem("aclp.onboarding.v1", JSON.stringify({ name: values.name, organization: values.organization, email: values.email }));
-    } catch {
-      /* storage unavailable */
+      await register({ name: values.name, organizationName: values.organization, email: values.email, password: values.password });
+      router.replace("/onboarding");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to create your account.");
+    } finally {
+      setPending(false);
     }
-    toast.success("Workspace details captured locally", { description: "Nothing was submitted to a server." });
-    router.push("/onboarding");
   }
 
   return (
     <div className="flex flex-col gap-6">
-      <PrototypeNotice />
-
       <form className="flex flex-col gap-4" onSubmit={form.handleSubmit(onSubmit)} noValidate>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
@@ -76,27 +78,13 @@ export function SignUpForm() {
           {form.formState.errors.password ? (
             <p className="text-xs text-destructive">{form.formState.errors.password.message}</p>
           ) : (
-            <p className="text-xs text-muted-foreground">At least 8 characters with one number. Stored nowhere.</p>
+            <p className="text-xs text-muted-foreground">At least 12 characters with uppercase, lowercase, and a number.</p>
           )}
         </div>
 
-        <div className="flex items-start gap-3">
-          <Checkbox
-            id="sign-up-agree"
-            checked={agree}
-            aria-invalid={Boolean(form.formState.errors.agree)}
-            onCheckedChange={(checked) => form.setValue("agree", checked === true, { shouldValidate: true })}
-          />
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="sign-up-agree" className="text-sm font-normal">
-              I understand this is a prototype and no account will be created.
-            </Label>
-            {form.formState.errors.agree ? <p className="text-xs text-destructive">{form.formState.errors.agree.message}</p> : null}
-          </div>
-        </div>
-
-        <Button type="submit" className="mt-2">
-          Continue to setup
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+        <Button type="submit" className="mt-2" disabled={pending}>
+          {pending ? "Creating account…" : "Create account"}
         </Button>
       </form>
 

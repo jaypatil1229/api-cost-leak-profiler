@@ -1,7 +1,7 @@
-import { OverviewView } from "@/components/dashboard/overview-view";
+import { OverviewApiView } from "@/components/dashboard/real-data-views";
 
 export const metadata = { title: "Overview" };
 
 export default function OverviewPage() {
-  return <OverviewView />;
+  return <OverviewApiView />;
 }

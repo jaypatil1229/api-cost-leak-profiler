@@ -58,7 +58,7 @@ export class UsageController {
     return this.usageService.getSummary(orgContext.organizationId, {
       from: query.from,
       to: query.to,
-      projectId: (query as any).projectId,
+      projectId: query.projectId,
     });
   }
 
@@ -78,7 +78,7 @@ export class UsageController {
       from: query.from,
       to: query.to,
       granularity: query.granularity as any,
-      projectId: (query as any).projectId,
+      projectId: query.projectId,
     });
   }
 
@@ -98,7 +98,7 @@ export class UsageController {
     return this.usageService.getBreakdown(orgContext.organizationId, dimension, {
       from: query.from,
       to: query.to,
-      projectId: (query as any).projectId,
+      projectId: query.projectId,
     });
   }
 

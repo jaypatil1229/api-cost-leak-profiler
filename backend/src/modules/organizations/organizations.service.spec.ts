@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MembershipStatus, OrgRole, OrganizationStatus } from '@prisma/client';
 
-import { ErrorCode } from '../../common/constants/error-codes';
 import { ConflictAppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../../common/services/audit.service';
@@ -38,7 +37,8 @@ describe('OrganizationsService', () => {
         {
           provide: AuditService,
           useValue: {
-            log: jest.fn(),
+            record: jest.fn().mockResolvedValue(undefined),
+            recordDetached: jest.fn(),
           },
         },
         {
@@ -49,7 +49,7 @@ describe('OrganizationsService', () => {
     }).compile();
 
     service = module.get<OrganizationsService>(OrganizationsService);
-    prisma = module.get(PrismaService) as jest.Mocked<PrismaService>;
+    prisma = module.get<jest.Mocked<PrismaService>>(PrismaService);
   });
 
   describe('create', () => {
@@ -129,6 +129,8 @@ describe('OrganizationsService', () => {
       } as any);
 
       const result = await service.create(input);
+
+      expect(result.slug).toBe('tech-startup-llc');
 
       expect(prisma.organization.create).toHaveBeenCalledWith(
         expect.objectContaining({

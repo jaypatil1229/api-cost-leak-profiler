@@ -5,6 +5,7 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
 import { ThemeProvider } from "@/components/shared/theme-provider";
+import { SessionProvider } from "@/components/auth/session-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -19,13 +20,13 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" suppressHydrationWarning>
       <body>
         <ThemeProvider>
-          <TooltipProvider delayDuration={200}>
-            <a className="skip-link" href="#main-content">
-              Skip to content
-            </a>
-            {children}
-            <Toaster position="bottom-right" />
-          </TooltipProvider>
+          <SessionProvider>
+            <TooltipProvider delayDuration={200}>
+              <a className="skip-link" href="#main-content">Skip to content</a>
+              {children}
+              <Toaster position="bottom-right" />
+            </TooltipProvider>
+          </SessionProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { DetectorType } from '@prisma/client';
 
 import { PrismaService } from '../../../database/prisma.service';
 
@@ -24,12 +25,12 @@ describe('DuplicatePromptDetector', () => {
     }).compile();
 
     detector = module.get<DuplicatePromptDetector>(DuplicatePromptDetector);
-    prisma = module.get(PrismaService) as jest.Mocked<PrismaService>;
+    prisma = module.get<jest.Mocked<PrismaService>>(PrismaService);
   });
 
   it('should have correct metadata', () => {
-    expect(detector.name).toBe('duplicate-prompt');
-    expect(detector.description).toContain('identical prompts');
+    expect(detector.type).toBe(DetectorType.DUPLICATE_PROMPT);
+    expect(detector.description).toContain('repeated identical prompts');
   });
 
   it('should find duplicate prompts', async () => {
@@ -56,12 +57,12 @@ describe('DuplicatePromptDetector', () => {
     const result = await detector.run({
       organizationId: 'org-1',
       projectId: 'proj-1',
-      from: new Date('2026-09-01'),
-      to: new Date('2026-09-02'),
+      windowStart: new Date('2026-09-01'),
+      windowEnd: new Date('2026-09-02'),
     });
 
     expect(result.findings).toHaveLength(1);
-    expect(result.findings[0].title).toContain('Duplicate prompts');
+    expect(result.findings[0].title).toContain('Duplicate prompt detected');
     expect(result.findings[0].usageRecordIds).toHaveLength(3);
     expect(result.findings[0].severity).toBe('LOW');
   });
@@ -85,8 +86,8 @@ describe('DuplicatePromptDetector', () => {
     const result = await detector.run({
       organizationId: 'org-1',
       projectId: 'proj-1',
-      from: new Date('2026-09-01'),
-      to: new Date('2026-09-02'),
+      windowStart: new Date('2026-09-01'),
+      windowEnd: new Date('2026-09-02'),
     });
 
     expect(result.findings).toHaveLength(0);

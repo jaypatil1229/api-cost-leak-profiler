@@ -1,11 +1,11 @@
 import { Prisma } from '@prisma/client';
 
-import { estimateCost, percentageChange, toMoneyString } from './money.util';
+import { costForTokens, percentageChange, toMoneyString } from './money.util';
 
 describe('money.util', () => {
   describe('estimateCost', () => {
     it('should calculate cost correctly', () => {
-      const result = estimateCost(1000000, new Prisma.Decimal('5.00'));
+      const result = costForTokens(1000000, new Prisma.Decimal('5.00'));
       expect(result.toNumber()).toBe(5.0);
     });
 
@@ -21,7 +21,7 @@ describe('money.util', () => {
 
     it('should preserve precision', () => {
       const result = costForTokens(123456, new Prisma.Decimal('1.23456789'));
-      expect(result.toString()).toBe('0.1524157751');
+      expect(result.toString()).toBe('0.15241481342784');
     });
   });
 
@@ -47,7 +47,7 @@ describe('money.util', () => {
 
   describe('toMoneyString', () => {
     it('should format decimal to 2 decimal places', () => {
-      expect(toMoneyString(new Prisma.Decimal('123.456'))).toBe('123.46');
+      expect(toMoneyString(new Prisma.Decimal('123.456'), 2)).toBe('123.46');
     });
 
     it('should format null as null', () => {
@@ -59,8 +59,8 @@ describe('money.util', () => {
     });
 
     it('should round correctly', () => {
-      expect(toMoneyString(new Prisma.Decimal('0.995'))).toBe('1.00');
-      expect(toMoneyString(new Prisma.Decimal('0.994'))).toBe('0.99');
+      expect(toMoneyString(new Prisma.Decimal('0.995'), 2)).toBe('1.00');
+      expect(toMoneyString(new Prisma.Decimal('0.994'), 2)).toBe('0.99');
     });
   });
 });

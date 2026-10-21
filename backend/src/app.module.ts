@@ -7,6 +7,8 @@ import { LoggerModule } from 'nestjs-pino';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { CommonModule } from './common/common.module';
+import { OrganizationContextGuard } from './common/guards/organization-context.guard';
+import { ProjectScopeGuard } from './common/guards/project-scope.guard';
 import { StrictRateLimitGuard } from './common/guards/strict-rate-limit.guard';
 import { AppConfigModule } from './config/config.module';
 import { buildLoggerParams } from './config/logger.config';
@@ -68,6 +70,8 @@ import type { Configuration } from './config/configuration';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: StrictRateLimitGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: OrganizationContextGuard },
+    { provide: APP_GUARD, useClass: ProjectScopeGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
   ],

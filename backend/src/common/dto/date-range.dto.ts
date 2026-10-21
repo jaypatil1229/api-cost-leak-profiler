@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDate, IsIn, IsOptional } from 'class-validator';
+import { IsDate, IsIn, IsOptional, IsUUID } from 'class-validator';
 
 import { TimeGranularity, type TimeGranularityValue } from '../utils/time-range.util';
 
@@ -11,6 +11,11 @@ import { TimeGranularity, type TimeGranularityValue } from '../utils/time-range.
  * exclusive. When omitted, endpoints default to a documented trailing window.
  */
 export class DateRangeQueryDto {
+  @ApiPropertyOptional({ format: 'uuid', description: 'Optional project scope. Membership is still checked by the backend.' })
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+
   @ApiPropertyOptional({
     description: 'Inclusive lower bound (ISO-8601, UTC). Defaults to a trailing window.',
     example: '2026-01-01T00:00:00.000Z',

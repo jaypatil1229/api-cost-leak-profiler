@@ -1,7 +1,7 @@
-import { AttributionView } from "@/components/dashboard/attribution-view";
+import { AttributionApiView } from "@/components/dashboard/real-data-views";
 
 export const metadata = { title: "Cost & attribution" };
 
 export default function AttributionPage() {
-  return <AttributionView />;
+  return <AttributionApiView />;
 }

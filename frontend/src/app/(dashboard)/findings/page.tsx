@@ -1,7 +1,7 @@
-import { FindingsView } from "@/components/dashboard/findings-view";
+import { FindingsApiView } from "@/components/dashboard/real-data-views";
 
 export const metadata = { title: "Leak detection" };
 
 export default function FindingsPage() {
-  return <FindingsView />;
+  return <FindingsApiView />;
 }

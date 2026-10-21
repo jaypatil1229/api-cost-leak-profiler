@@ -241,7 +241,7 @@ model RefreshToken {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /// Shared across every token produced by one login chain.
-  familyId String @db.Uuid
+  familyId  String @db.Uuid
   /// SHA-256 of the token secret. Unique so a hash collision cannot alias sessions.
   tokenHash String @unique
 
@@ -272,9 +272,9 @@ model VerificationToken {
   purpose   VerificationTokenPurpose
   tokenHash String                   @unique
 
-  expiresAt DateTime
+  expiresAt  DateTime
   consumedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   @@index([userId, purpose])
   @@index([expiresAt])
@@ -301,16 +301,16 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships  OrganizationMembership[]
-  invitations  OrganizationInvitation[]
-  projects     Project[]
-  apiKeys      ApiKey[]
-  usageRecords UsageRecord[]
-  findings     DetectionFinding[]
-  alerts       Alert[]
-  savedReports SavedReport[]
-  auditLogs    AuditLog[]
-  batches      IngestionBatch[]
+  memberships   OrganizationMembership[]
+  invitations   OrganizationInvitation[]
+  projects      Project[]
+  apiKeys       ApiKey[]
+  usageRecords  UsageRecord[]
+  findings      DetectionFinding[]
+  alerts        Alert[]
+  savedReports  SavedReport[]
+  auditLogs     AuditLog[]
+  batches       IngestionBatch[]
   detectionRuns DetectionRun[]
 
   @@index([ownerUserId])
@@ -348,8 +348,8 @@ model OrganizationInvitation {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   /// Normalised invitee email.
-  email String           @db.VarChar(320)
-  role  OrgRole          @default(MEMBER)
+  email  String           @db.VarChar(320)
+  role   OrgRole          @default(MEMBER)
   status InvitationStatus @default(PENDING)
 
   tokenHash String @unique
@@ -393,12 +393,12 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  apiKeys      ApiKey[]
-  usageRecords UsageRecord[]
-  findings     DetectionFinding[]
-  alerts       Alert[]
-  savedReports SavedReport[]
-  batches      IngestionBatch[]
+  apiKeys       ApiKey[]
+  usageRecords  UsageRecord[]
+  findings      DetectionFinding[]
+  alerts        Alert[]
+  savedReports  SavedReport[]
+  batches       IngestionBatch[]
   detectionRuns DetectionRun[]
 
   @@unique([organizationId, slug])
@@ -562,10 +562,10 @@ model UsageRecord {
   /// When ACLP received the event (server clock).
   receivedAt DateTime @default(now())
 
-  inputTokens  Int
-  outputTokens Int
+  inputTokens       Int
+  outputTokens      Int
   /// input + output unless the SDK reports an authoritative total.
-  totalTokens  Int
+  totalTokens       Int
   /// Cached//reused prompt tokens reported by the provider, when available.
   cachedInputTokens Int?
 
@@ -575,7 +575,7 @@ model UsageRecord {
 
   // ---- attribution dimensions (all customer-supplied, all optional) --------
   /// Customer's feature / code-path label.
-  featureId String? @db.VarChar(128)
+  featureId      String? @db.VarChar(128)
   /// Customer's own end-user identifier. NOT an ACLP login user.
   customerUserId String? @db.VarChar(128)
   sessionId      String? @db.VarChar(128)
@@ -587,10 +587,10 @@ model UsageRecord {
   completionCharCount Int?
 
   // ---- estimated cost ------------------------------------------------------
-  estimatedInputCost  Decimal? @db.Decimal(20, 10)
-  estimatedOutputCost Decimal? @db.Decimal(20, 10)
-  estimatedTotalCost  Decimal? @db.Decimal(20, 10)
-  currency            String   @default("USD") @db.VarChar(3)
+  estimatedInputCost  Decimal?   @db.Decimal(20, 10)
+  estimatedOutputCost Decimal?   @db.Decimal(20, 10)
+  estimatedTotalCost  Decimal?   @db.Decimal(20, 10)
+  currency            String     @default("USD") @db.VarChar(3)
   costStatus          CostStatus @default(PENDING_PRICING)
 
   modelPricingId String?       @db.Uuid
@@ -700,9 +700,9 @@ model DetectionFinding {
 
   detectedAt DateTime @default(now())
 
-  acknowledgedAt     DateTime?
-  acknowledgedByUserId String? @db.Uuid
-  acknowledgedBy     User?     @relation("FindingAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  acknowledgedAt       DateTime?
+  acknowledgedByUserId String?   @db.Uuid
+  acknowledgedBy       User?     @relation("FindingAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
 
   resolvedAt       DateTime?
   resolvedByUserId String?   @db.Uuid
@@ -777,10 +777,10 @@ model Alert {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([findingId])
   @@index([organizationId, status, createdAt])
   @@index([organizationId, severity, status])
   @@index([projectId, status, createdAt])
-  @@index([findingId])
 }
 
 // =============================================================================
@@ -798,8 +798,8 @@ model SavedReport {
   projectId      String?      @db.Uuid
   project        Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  name        String  @db.VarChar(120)
-  description String? @db.VarChar(1000)
+  name        String     @db.VarChar(120)
+  description String?    @db.VarChar(1000)
   type        ReportType
 
   /// Validated against the report filter DTO before persistence.
@@ -823,11 +823,11 @@ model AuditLog {
   organizationId String?       @db.Uuid
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
-  actorType   AuditActorType @default(USER)
-  actorUserId String?        @db.Uuid
-  actorUser   User?          @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorType     AuditActorType @default(USER)
+  actorUserId   String?        @db.Uuid
+  actorUser     User?          @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   /// Set when the actor was an SDK API key (no FK: keys may be hard-deleted).
-  actorApiKeyId String? @db.Uuid
+  actorApiKeyId String?        @db.Uuid
 
   /// Dotted action name, e.g. "organization.member.role_changed".
   action String @db.VarChar(100)

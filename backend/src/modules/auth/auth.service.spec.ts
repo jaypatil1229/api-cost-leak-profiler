@@ -1,9 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@prisma/client';
 
-import { ErrorCode } from '../../common/constants/error-codes';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../../common/services/audit.service';
 import { APP_CONFIG } from '../../config/config.module';
@@ -11,6 +9,7 @@ import { APP_CONFIG } from '../../config/config.module';
 import { AuthService } from './auth.service';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
+import { UnauthorizedAppException } from '../../common/exceptions/app.exception';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -22,7 +21,13 @@ describe('AuthService', () => {
     auth: {
       jwtSecret: 'test-secret',
       jwtExpiresIn: '15m',
-      refreshTokenTtlMs: 604800000,
+      refreshTokenTtlSeconds: 604800,
+      refreshSecret: 'test-refresh-secret',
+      accessSecret: 'test-access-secret',
+      accessTokenTtlSeconds: 900,
+      issuer: 'aclp-test',
+      audience: 'aclp-test-client',
+      autoCreateOrganizationOnRegister: false,
     },
   };
 
@@ -52,11 +57,13 @@ describe('AuthService', () => {
             },
             refreshToken: {
               create: jest.fn(),
-              findFirst: jest.fn(),
-              update: jest.fn(),
-              deleteMany: jest.fn(),
+            findUnique: jest.fn(),
+            update: jest.fn(),
+            updateMany: jest.fn(),
             },
-            $transaction: jest.fn((fn) => fn(prisma)),
+            $transaction: jest.fn((operation) =>
+              typeof operation === 'function' ? operation(prisma) : Promise.all(operation),
+            ),
           },
         },
         {
@@ -69,9 +76,18 @@ describe('AuthService', () => {
         {
           provide: TokenService,
           useValue: {
-            generateAccessToken: jest.fn(),
-            generateRefreshToken: jest.fn(),
-            hashToken: jest.fn(),
+            issueRefreshToken: jest.fn(() => ({
+              raw: 'refresh-token-raw',
+              hash: 'refresh-token-hash',
+              expiresAt: new Date(Date.now() + 604800000),
+              expiresInSeconds: 604800,
+            })),
+            hashRefreshToken: jest.fn(() => 'refresh-token-hash'),
+            signAccessToken: jest.fn().mockResolvedValue({
+              token: 'access-token',
+              tokenId: 'access-id',
+              expiresInSeconds: 900,
+            }),
           },
         },
         {
@@ -84,7 +100,8 @@ describe('AuthService', () => {
         {
           provide: AuditService,
           useValue: {
-            log: jest.fn(),
+            record: jest.fn().mockResolvedValue(undefined),
+            recordDetached: jest.fn(),
           },
         },
         {
@@ -95,9 +112,9 @@ describe('AuthService', () => {
     }).compile();
 
     service = module.get<AuthService>(AuthService);
-    prisma = module.get(PrismaService) as jest.Mocked<PrismaService>;
-    passwordService = module.get(PasswordService) as jest.Mocked<PasswordService>;
-    tokenService = module.get(TokenService) as jest.Mocked<TokenService>;
+    prisma = module.get<jest.Mocked<PrismaService>>(PrismaService);
+    passwordService = module.get<jest.Mocked<PasswordService>>(PasswordService);
+    tokenService = module.get<jest.Mocked<TokenService>>(TokenService);
   });
 
   describe('register', () => {
@@ -111,18 +128,18 @@ describe('AuthService', () => {
 
       prisma.user.findUnique.mockResolvedValue(null);
       passwordService.hash.mockResolvedValue('hashed-password');
-      prisma.user.create.mockResolvedValue(mockUser);
+      prisma.user.create.mockResolvedValue({ ...mockUser, email: input.email, name: input.name });
 
       const result = await service.register(input);
 
-      expect(result).toEqual({
+      expect(result.user).toEqual(expect.objectContaining({
         id: mockUser.id,
-        email: mockUser.email,
-        name: mockUser.name,
+        email: 'new@example.com',
+        name: input.name,
         status: mockUser.status,
-        emailVerifiedAt: mockUser.emailVerifiedAt.toISOString(),
-        createdAt: mockUser.createdAt.toISOString(),
-      });
+      }));
+      expect(result.accessToken).toBe('access-token');
+      expect(result.refreshToken).toBe('refresh-token-raw');
       expect(passwordService.hash).toHaveBeenCalledWith(input.password);
       expect(prisma.user.create).toHaveBeenCalled();
     });
@@ -137,7 +154,7 @@ describe('AuthService', () => {
           name: 'Test',
           actor: { ip: '127.0.0.1', userAgent: 'test' },
         }),
-      ).rejects.toThrow('An account with this email already exists.');
+      ).rejects.toThrow('This email is already registered.');
     });
   });
 
@@ -145,9 +162,13 @@ describe('AuthService', () => {
     it('should return tokens for valid credentials', async () => {
       prisma.user.findUnique.mockResolvedValue(mockUser);
       passwordService.verify.mockResolvedValue(true);
-      tokenService.generateAccessToken.mockReturnValue('access-token');
-      tokenService.generateRefreshToken.mockReturnValue('refresh-token-raw');
-      tokenService.hashToken.mockReturnValue('refresh-token-hash');
+      tokenService.issueRefreshToken.mockReturnValue({
+        raw: 'refresh-token-raw', hash: 'refresh-token-hash',
+        expiresAt: new Date(Date.now() + 604800000), expiresInSeconds: 604800,
+      });
+      tokenService.signAccessToken.mockResolvedValue({
+        token: 'access-token', tokenId: 'access-id', expiresInSeconds: 900,
+      });
 
       const result = await service.login({
         email: 'test@example.com',
@@ -173,7 +194,7 @@ describe('AuthService', () => {
           password: 'wrong-password',
           actor: { ip: '127.0.0.1', userAgent: 'test' },
         }),
-      ).rejects.toThrow(UnauthorizedException);
+      ).rejects.toThrow(UnauthorizedAppException);
     });
 
     it('should reject suspended user', async () => {
@@ -181,6 +202,7 @@ describe('AuthService', () => {
         ...mockUser,
         status: UserStatus.SUSPENDED,
       });
+      passwordService.verify.mockResolvedValue(true);
 
       await expect(
         service.login({
@@ -189,6 +211,22 @@ describe('AuthService', () => {
           actor: { ip: '127.0.0.1', userAgent: 'test' },
         }),
       ).rejects.toThrow('Your account has been suspended.');
+    });
+
+    it('should reject deactivated user after password verification', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        status: UserStatus.DEACTIVATED,
+      });
+      passwordService.verify.mockResolvedValue(true);
+
+      await expect(
+        service.login({
+          email: 'test@example.com',
+          password: 'correct-password',
+          actor: { ip: '127.0.0.1', userAgent: 'test' },
+        }),
+      ).rejects.toThrow('Your account is not active.');
     });
   });
 
@@ -204,14 +242,19 @@ describe('AuthService', () => {
         createdAt: new Date(),
       };
 
-      tokenService.hashToken.mockReturnValue('stored-hash');
-      prisma.refreshToken.findFirst.mockResolvedValue(storedToken);
+      tokenService.hashRefreshToken.mockReturnValue('stored-hash');
+      prisma.refreshToken.findUnique.mockResolvedValue({ ...storedToken, familyId: 'family-1', replacedById: null });
       prisma.user.findUnique.mockResolvedValue(mockUser);
-      tokenService.generateAccessToken.mockReturnValue('new-access-token');
-      tokenService.generateRefreshToken.mockReturnValue('new-refresh-token');
+      tokenService.issueRefreshToken.mockReturnValue({
+        raw: 'new-refresh-token', hash: 'new-hash',
+        expiresAt: new Date(Date.now() + 604800000), expiresInSeconds: 604800,
+      });
+      tokenService.signAccessToken.mockResolvedValue({
+        token: 'new-access-token', tokenId: 'new-access-id', expiresInSeconds: 900,
+      });
 
       const result = await service.refresh({
-        refreshToken: 'old-refresh-token',
+        rawToken: 'old-refresh-token',
         actor: { ip: '127.0.0.1', userAgent: 'test' },
       });
 
@@ -226,19 +269,48 @@ describe('AuthService', () => {
         tokenHash: 'stored-hash',
         expiresAt: new Date(Date.now() + 100000),
         revokedAt: null,
-        usedAt: new Date(),
+        familyId: 'family-1',
+        replacedById: 'replacement-token',
         createdAt: new Date(),
       };
 
-      tokenService.hashToken.mockReturnValue('stored-hash');
-      prisma.refreshToken.findFirst.mockResolvedValue(reusedToken);
+      tokenService.hashRefreshToken.mockReturnValue('stored-hash');
+      prisma.refreshToken.findUnique.mockResolvedValue(reusedToken);
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(
         service.refresh({
-          refreshToken: 'reused-token',
+          rawToken: 'reused-token',
           actor: { ip: '127.0.0.1', userAgent: 'test' },
         }),
-      ).rejects.toThrow('Refresh token has already been used');
+      ).rejects.toThrow('This refresh token has already been used.');
+    });
+
+    it('revokes the refresh-token family for an inactive user', async () => {
+      tokenService.hashRefreshToken.mockReturnValue('stored-hash');
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'token-1',
+        userId: mockUser.id,
+        familyId: 'family-1',
+        expiresAt: new Date(Date.now() + 100000),
+        revokedAt: null,
+        replacedById: null,
+      });
+      prisma.user.findUnique.mockResolvedValue({ ...mockUser, status: UserStatus.SUSPENDED });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.refresh({
+          rawToken: 'valid-but-inactive-user-token',
+          actor: { ip: '127.0.0.1', userAgent: 'test' },
+        }),
+      ).rejects.toThrow('Your account has been suspended.');
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { familyId: 'family-1', revokedAt: null },
+          data: expect.objectContaining({ revokedReason: 'account_inactive' }),
+        }),
+      );
     });
   });
 });

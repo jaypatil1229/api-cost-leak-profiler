@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Prisma, CostStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 import { APP_CONFIG } from '../../config/config.module';
@@ -42,7 +42,7 @@ describe('UsageService', () => {
     }).compile();
 
     service = module.get<UsageService>(UsageService);
-    prisma = module.get(PrismaService) as jest.Mocked<PrismaService>;
+    prisma = module.get<jest.Mocked<PrismaService>>(PrismaService);
   });
 
   describe('getSummary', () => {
@@ -59,18 +59,19 @@ describe('UsageService', () => {
 
       prisma.usageRecord.aggregate.mockResolvedValue(mockAgg as any);
 
-      const result = await service.getSummary(
-        'org-1',
-        {},
-        new Date('2026-09-01'),
-        new Date('2026-09-30'),
-      );
+      const result = await service.getSummary('org-1', {
+        from: new Date('2026-09-01T00:00:00.000Z'),
+        to: new Date('2026-09-30T00:00:00.000Z'),
+      });
 
       expect(result.totalEvents).toBe(150);
       expect(result.totalInputTokens).toBe(50000);
       expect(result.totalOutputTokens).toBe(30000);
       expect(result.totalTokens).toBe(80000);
-      expect(result.totalCost).toBe('1.25');
+      expect(result.totalCost).toBe('1.2500000000');
+      expect(prisma.usageRecord.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ organizationId: 'org-1' }) }),
+      );
     });
 
     it('should handle null aggregates gracefully', async () => {
@@ -84,31 +85,23 @@ describe('UsageService', () => {
         },
       } as any);
 
-      const result = await service.getSummary(
-        'org-1',
-        {},
-        new Date('2026-09-01'),
-        new Date('2026-09-30'),
-      );
+      const result = await service.getSummary('org-1', {
+        from: new Date('2026-09-01T00:00:00.000Z'),
+        to: new Date('2026-09-30T00:00:00.000Z'),
+      });
 
       expect(result.totalEvents).toBe(0);
       expect(result.totalInputTokens).toBe(0);
-      expect(result.totalCost).toBe('0.00');
+      expect(result.totalCost).toBeNull();
     });
   });
 
-  describe('listUsageRecords', () => {
+  describe('listRecords', () => {
     it('should apply organization isolation', async () => {
       prisma.usageRecord.findMany.mockResolvedValue([]);
       prisma.usageRecord.count.mockResolvedValue(0);
 
-      await service.listUsageRecords(
-        'org-1',
-        {},
-        new Date('2026-09-01'),
-        new Date('2026-09-30'),
-        { skip: 0, take: 25 },
-      );
+      await service.listRecords('org-1', {});
 
       expect(prisma.usageRecord.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -123,13 +116,7 @@ describe('UsageService', () => {
       prisma.usageRecord.findMany.mockResolvedValue([]);
       prisma.usageRecord.count.mockResolvedValue(0);
 
-      await service.listUsageRecords(
-        'org-1',
-        { projectId: 'proj-1' },
-        new Date('2026-09-01'),
-        new Date('2026-09-30'),
-        { skip: 0, take: 25 },
-      );
+      await service.listRecords('org-1', { projectId: 'proj-1' });
 
       expect(prisma.usageRecord.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

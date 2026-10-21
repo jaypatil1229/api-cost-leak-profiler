@@ -1,8 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProjectEnvironment, ProjectStatus } from '@prisma/client';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
-import { SLUG_PATTERN } from '../organizations/dto/organization.dto';
+import { SLUG_PATTERN } from '../../organizations/dto/organization.dto';
 
 export class CreateProjectDto {
   @ApiProperty({ example: 'Production API', maxLength: 120 })
