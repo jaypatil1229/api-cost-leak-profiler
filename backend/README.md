@@ -137,7 +137,7 @@ Copy-Item .env.test.example .env.test
 
 Keep the raw key/password only in ignored local config or process environment. If DATABASE_URL is inherited by the process, ensure it matches the test target; the guard rejects a different host, port, database, user, or password mismatch.
 
-Security boundary: the populated test environment file was removed from the proposed release tree, but that deletion does not purge earlier Git commits. Treat the historical value as potentially compromised until its owner establishes provenance and reuse. Do not reuse the historical target/value or include credentials in documentation. A local ignored test file should contain only newly generated disposable credentials.
+Security boundary: the release-candidate tree removes the tracked backend/.env.test path (commit 5a6bc20), but this does not purge earlier Git commits. Treat the historical credential as potentially compromised until its owner establishes provenance and reuse; its deletion does not resolve that investigation. Do not use the historical target/value or include credentials in documentation. The ignored local backend/.env.test must contain only newly generated disposable test credentials and must never be committed.
 
 Start and verify the disposable database, then deploy reviewed migrations through the guard:
 
