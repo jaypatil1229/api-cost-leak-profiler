@@ -4,6 +4,17 @@ import { IngestionService } from './ingestion.service';
 
 describe('IngestionService cached input pricing', () => {
   const calculateCost = (Object.create(IngestionService.prototype) as any).calculateCost;
+  const validateEvent = (Object.create(IngestionService.prototype) as any).validateEvent;
+
+  it('rejects cached input counts greater than total input before persistence', () => {
+    const result = validateEvent({
+      eventId: 'invalid-cache-count', provider: 'OPENAI', model: 'gpt-4o',
+      occurredAt: new Date().toISOString(), inputTokens: 2, outputTokens: 0,
+      totalTokens: 2, cachedInputTokens: 3,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('cachedInputTokens');
+  });
 
   it('prices cached and uncached input tokens once at their respective rates', () => {
     const result = calculateCost(

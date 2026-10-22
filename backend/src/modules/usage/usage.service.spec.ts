@@ -8,7 +8,7 @@ import { UsageService } from './usage.service';
 
 describe('UsageService', () => {
   let service: UsageService;
-  let prisma: jest.Mocked<PrismaService>;
+  let prisma: jest.MockedObjectDeep<PrismaService>;
 
   const mockConfig = {
     limits: {
@@ -42,7 +42,7 @@ describe('UsageService', () => {
     }).compile();
 
     service = module.get<UsageService>(UsageService);
-    prisma = module.get<jest.Mocked<PrismaService>>(PrismaService);
+    prisma = module.get<jest.MockedObjectDeep<PrismaService>>(PrismaService);
   });
 
   describe('getSummary', () => {

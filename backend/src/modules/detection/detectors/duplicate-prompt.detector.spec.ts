@@ -7,7 +7,7 @@ import { DuplicatePromptDetector } from './duplicate-prompt.detector';
 
 describe('DuplicatePromptDetector', () => {
   let detector: DuplicatePromptDetector;
-  let prisma: jest.Mocked<PrismaService>;
+  let prisma: jest.MockedObjectDeep<PrismaService>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -25,7 +25,7 @@ describe('DuplicatePromptDetector', () => {
     }).compile();
 
     detector = module.get<DuplicatePromptDetector>(DuplicatePromptDetector);
-    prisma = module.get<jest.Mocked<PrismaService>>(PrismaService);
+    prisma = module.get<jest.MockedObjectDeep<PrismaService>>(PrismaService);
   });
 
   it('should have correct metadata', () => {

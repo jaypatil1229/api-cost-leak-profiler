@@ -109,6 +109,15 @@ describe("recordUsage", () => {
     client.shutdown();
   });
 
+  it("rejects cached input tokens greater than total input tokens", () => {
+    const { client } = makeClient();
+    expect(() => client.recordUsage({
+      provider: "OPENAI", model: "gpt-4o", inputTokens: 2, outputTokens: 0, cachedInputTokens: 3,
+    })).toThrow("cachedInputTokens cannot exceed inputTokens");
+    expect(client.getQueueLength()).toBe(0);
+    client.shutdown();
+  });
+
   it("rejects too-long model and event IDs", () => {
     const { client } = makeClient();
     expect(() => client.recordUsage({ provider: "OPENAI", model: "m".repeat(121) })).toThrow("model");

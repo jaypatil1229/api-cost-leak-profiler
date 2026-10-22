@@ -13,7 +13,7 @@ import { UnauthorizedAppException } from '../../common/exceptions/app.exception'
 
 describe('AuthService', () => {
   let service: AuthService;
-  let prisma: jest.Mocked<PrismaService>;
+  let prisma: jest.MockedObjectDeep<PrismaService>;
   let passwordService: jest.Mocked<PasswordService>;
   let tokenService: jest.Mocked<TokenService>;
 
@@ -112,7 +112,7 @@ describe('AuthService', () => {
     }).compile();
 
     service = module.get<AuthService>(AuthService);
-    prisma = module.get<jest.Mocked<PrismaService>>(PrismaService);
+    prisma = module.get<jest.MockedObjectDeep<PrismaService>>(PrismaService);
     passwordService = module.get<jest.Mocked<PasswordService>>(PasswordService);
     tokenService = module.get<jest.Mocked<TokenService>>(TokenService);
   });
@@ -123,7 +123,7 @@ describe('AuthService', () => {
         email: 'new@example.com',
         password: 'StrongPass123!',
         name: 'New User',
-        actor: { ip: '127.0.0.1', userAgent: 'test' },
+        actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
       };
 
       prisma.user.findUnique.mockResolvedValue(null);
@@ -152,7 +152,7 @@ describe('AuthService', () => {
           email: 'test@example.com',
           password: 'Pass123!',
           name: 'Test',
-          actor: { ip: '127.0.0.1', userAgent: 'test' },
+          actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
         }),
       ).rejects.toThrow('This email is already registered.');
     });
@@ -173,7 +173,7 @@ describe('AuthService', () => {
       const result = await service.login({
         email: 'test@example.com',
         password: 'correct-password',
-        actor: { ip: '127.0.0.1', userAgent: 'test' },
+        actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
       });
 
       expect(result.accessToken).toBe('access-token');
@@ -192,7 +192,7 @@ describe('AuthService', () => {
         service.login({
           email: 'test@example.com',
           password: 'wrong-password',
-          actor: { ip: '127.0.0.1', userAgent: 'test' },
+          actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
         }),
       ).rejects.toThrow(UnauthorizedAppException);
     });
@@ -208,7 +208,7 @@ describe('AuthService', () => {
         service.login({
           email: 'test@example.com',
           password: 'correct-password',
-          actor: { ip: '127.0.0.1', userAgent: 'test' },
+          actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
         }),
       ).rejects.toThrow('Your account has been suspended.');
     });
@@ -224,7 +224,7 @@ describe('AuthService', () => {
         service.login({
           email: 'test@example.com',
           password: 'correct-password',
-          actor: { ip: '127.0.0.1', userAgent: 'test' },
+          actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
         }),
       ).rejects.toThrow('Your account is not active.');
     });
@@ -243,7 +243,7 @@ describe('AuthService', () => {
       };
 
       tokenService.hashRefreshToken.mockReturnValue('stored-hash');
-      prisma.refreshToken.findUnique.mockResolvedValue({ ...storedToken, familyId: 'family-1', replacedById: null });
+      (prisma.refreshToken.findUnique as jest.Mock).mockResolvedValue({ ...storedToken, familyId: 'family-1', replacedById: null });
       prisma.user.findUnique.mockResolvedValue(mockUser);
       tokenService.issueRefreshToken.mockReturnValue({
         raw: 'new-refresh-token', hash: 'new-hash',
@@ -255,7 +255,7 @@ describe('AuthService', () => {
 
       const result = await service.refresh({
         rawToken: 'old-refresh-token',
-        actor: { ip: '127.0.0.1', userAgent: 'test' },
+        actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
       });
 
       expect(result.accessToken).toBe('new-access-token');
@@ -275,20 +275,20 @@ describe('AuthService', () => {
       };
 
       tokenService.hashRefreshToken.mockReturnValue('stored-hash');
-      prisma.refreshToken.findUnique.mockResolvedValue(reusedToken);
+      (prisma.refreshToken.findUnique as jest.Mock).mockResolvedValue(reusedToken);
       prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(
         service.refresh({
           rawToken: 'reused-token',
-          actor: { ip: '127.0.0.1', userAgent: 'test' },
+          actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
         }),
       ).rejects.toThrow('This refresh token has already been used.');
     });
 
     it('revokes the refresh-token family for an inactive user', async () => {
       tokenService.hashRefreshToken.mockReturnValue('stored-hash');
-      prisma.refreshToken.findUnique.mockResolvedValue({
+      (prisma.refreshToken.findUnique as jest.Mock).mockResolvedValue({
         id: 'token-1',
         userId: mockUser.id,
         familyId: 'family-1',
@@ -302,7 +302,7 @@ describe('AuthService', () => {
       await expect(
         service.refresh({
           rawToken: 'valid-but-inactive-user-token',
-          actor: { ip: '127.0.0.1', userAgent: 'test' },
+          actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
         }),
       ).rejects.toThrow('Your account has been suspended.');
       expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(

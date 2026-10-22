@@ -15,7 +15,6 @@ export class AclpClient {
   private readonly queue: UsageEvent[] = [];
   private timer?: NodeJS.Timeout;
   private readonly http: AxiosInstance;
-  private isFlushing = false;
   private activeFlushPromise?: Promise<void>;
   private hasWarnedQueueFull = false;
   private isShutdown = false;
@@ -86,6 +85,12 @@ export class AclpClient {
 
     const inputTokens = this.validateCount("inputTokens", event.inputTokens ?? 0);
     const outputTokens = this.validateCount("outputTokens", event.outputTokens ?? 0);
+    const cachedInputTokens = event.cachedInputTokens != null
+      ? this.validateCount("cachedInputTokens", event.cachedInputTokens)
+      : undefined;
+    if (cachedInputTokens != null && cachedInputTokens > inputTokens) {
+      throw new Error("cachedInputTokens cannot exceed inputTokens.");
+    }
     const totalTokens = this.validateCount("totalTokens", event.totalTokens ?? inputTokens + outputTokens);
     const occurredAt = event.occurredAt ?? new Date().toISOString();
     if (typeof occurredAt !== "string" || !Number.isFinite(Date.parse(occurredAt))) {
@@ -112,10 +117,7 @@ export class AclpClient {
       inputTokens,
       outputTokens,
       totalTokens,
-      cachedInputTokens:
-        event.cachedInputTokens != null
-          ? this.validateCount("cachedInputTokens", event.cachedInputTokens)
-          : undefined,
+      cachedInputTokens,
       latencyMs:
         event.latencyMs != null
           ? this.validateCount("latencyMs", event.latencyMs)
@@ -179,7 +181,6 @@ export class AclpClient {
       return;
     }
 
-    this.isFlushing = true;
     this.activeFlushPromise = (async () => {
       try {
         while (this.queue.length > 0) {
@@ -197,7 +198,6 @@ export class AclpClient {
           }
         }
       } finally {
-        this.isFlushing = false;
         this.activeFlushPromise = undefined;
       }
     })();
