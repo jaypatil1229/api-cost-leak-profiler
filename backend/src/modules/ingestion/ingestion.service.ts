@@ -6,7 +6,7 @@ import {
   MAX_EVENT_CLOCK_SKEW_MS,
 } from '../../common/constants/app.constants';
 import { sanitizeMetadata } from '../../common/utils/metadata.util';
-import { costForTokens } from '../../common/utils/money.util';
+import { calculateUsageCost } from '../../common/utils/usage-cost.util';
 import { APP_CONFIG } from '../../config/config.module';
 import type { Configuration } from '../../config/configuration';
 import { PrismaService } from '../../database/prisma.service';
@@ -261,6 +261,10 @@ export class IngestionService {
       return { valid: false, reason: 'Token counts cannot be negative.' };
     }
 
+    if ((event.cachedInputTokens ?? 0) > event.inputTokens) {
+      return { valid: false, reason: 'cachedInputTokens cannot exceed inputTokens.' };
+    }
+
     return { valid: true };
   }
 
@@ -298,21 +302,12 @@ export class IngestionService {
     total: Prisma.Decimal | null;
     status: CostStatus;
   } {
-    const cachedTokenCount = pricing.cachedInputRatePerMillionTokens
-      ? Math.min(event.cachedInputTokens ?? 0, event.inputTokens)
-      : 0;
-    const uncachedInputTokens = event.inputTokens - cachedTokenCount;
-    const cachedCost = cachedTokenCount > 0 && pricing.cachedInputRatePerMillionTokens
-      ? costForTokens(cachedTokenCount, pricing.cachedInputRatePerMillionTokens)
-      : new Prisma.Decimal(0);
-    const inputCost = costForTokens(uncachedInputTokens, pricing.inputRatePerMillionTokens).plus(cachedCost);
-    const outputCost = costForTokens(event.outputTokens, pricing.outputRatePerMillionTokens);
-    const totalCost = inputCost.plus(outputCost);
+    const calculated = calculateUsageCost(event, pricing);
 
     return {
-      input: inputCost,
-      output: outputCost,
-      total: totalCost,
+      input: calculated.input,
+      output: calculated.output,
+      total: calculated.total,
       status: CostStatus.CALCULATED,
     };
   }

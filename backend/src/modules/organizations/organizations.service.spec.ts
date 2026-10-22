@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { MembershipStatus, OrgRole, OrganizationStatus } from '@prisma/client';
+import { MembershipStatus, OrgRole, OrganizationPlan, OrganizationStatus } from '@prisma/client';
 
 import { ConflictAppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
@@ -10,7 +10,7 @@ import { OrganizationsService } from './organizations.service';
 
 describe('OrganizationsService', () => {
   let service: OrganizationsService;
-  let prisma: jest.Mocked<PrismaService>;
+  let prisma: jest.MockedObjectDeep<PrismaService>;
 
   const mockConfig = {
     limits: {
@@ -49,7 +49,7 @@ describe('OrganizationsService', () => {
     }).compile();
 
     service = module.get<OrganizationsService>(OrganizationsService);
-    prisma = module.get<jest.Mocked<PrismaService>>(PrismaService);
+    prisma = module.get<jest.MockedObjectDeep<PrismaService>>(PrismaService);
   });
 
   describe('create', () => {
@@ -58,7 +58,7 @@ describe('OrganizationsService', () => {
         name: 'Acme Inc',
         slug: 'acme-inc',
         userId: 'user-1',
-        actor: { ip: '127.0.0.1', userAgent: 'test' },
+        actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
       };
 
       const mockOrg = {
@@ -67,7 +67,7 @@ describe('OrganizationsService', () => {
         slug: input.slug,
         ownerUserId: input.userId,
         status: OrganizationStatus.ACTIVE,
-        plan: 'FREE',
+        plan: OrganizationPlan.FREE,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -110,7 +110,7 @@ describe('OrganizationsService', () => {
           name: 'Another Acme',
           slug: 'acme-inc',
           userId: 'user-1',
-          actor: { ip: '127.0.0.1', userAgent: 'test' },
+          actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
         }),
       ).rejects.toThrow(ConflictAppException);
     });
@@ -119,7 +119,7 @@ describe('OrganizationsService', () => {
       const input = {
         name: 'Tech Startup LLC',
         userId: 'user-1',
-        actor: { ip: '127.0.0.1', userAgent: 'test' },
+        actor: { ipAddress: '127.0.0.1', userAgent: 'test' },
       };
 
       prisma.organization.findUnique.mockResolvedValue(null);

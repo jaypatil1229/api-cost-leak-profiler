@@ -45,6 +45,9 @@ function validateUrl() {
   if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
     throw new Error('Refusing database operation: test database host must be loopback.');
   }
+  if (url.port !== '55432') {
+    throw new Error('Refusing database operation: test database port must be 55432.');
+  }
   if (database !== 'aclp_test' || decodeURIComponent(url.username) !== 'aclp_test') {
     throw new Error('Refusing database operation: expected database and user aclp_test.');
   }
