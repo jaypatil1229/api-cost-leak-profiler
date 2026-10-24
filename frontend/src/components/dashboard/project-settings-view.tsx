@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckIcon, KeyRoundIcon, PlugZapIcon, PlusIcon, RotateCcwIcon, ShieldAlertIcon, Trash2Icon } from "lucide-react";
+import { CheckIcon, KeyRoundIcon, PlugZapIcon, PlusIcon, RotateCcwIcon, ShieldAlertIcon, Trash2Icon, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,6 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/shared/page-header";
 import { CopyButton } from "@/components/shared/copy-button";
-import { SampleDataNotice } from "@/components/shared/empty-state";
 import { useProject } from "@/hooks/use-project";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { getProject, getProjects } from "@/lib/mock-services/repository";
@@ -23,7 +22,20 @@ import { SDK_SNIPPETS } from "@/lib/mock-data/projects";
 import { STORAGE_KEYS } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { apiRequest } from "@/lib/api/client";
 import type { Project } from "@/types/domain";
+
+interface WebApiKey {
+  id: string;
+  label: string;
+  maskedKey: string;
+  keyPrefix: string;
+  scope: string;
+  lastUsedAt: string;
+  createdAt: string;
+  status: "active" | "revoked";
+  rawKey?: string;
+}
 
 const generalSchema = z.object({
   name: z.string().min(3, "Project name needs at least 3 characters."),
@@ -65,6 +77,68 @@ function readStoredSettings(projectId: string): Project | null {
   }
 }
 
+// Fetch API keys from backend
+async function fetchApiKeys(projectId: string) {
+  const response = await apiRequest<{ apiKeys: { id: string; keyPrefix: string; name: string; scopes: string[]; createdAt: string; lastUsedAt: string | null; expiresAt: string | null; revokedAt: string | null }[] }>(`/projects/${projectId}/api-keys`);
+  return response.apiKeys.map((key) => {
+    const status: "active" | "revoked" = key.revokedAt || (key.expiresAt && new Date(key.expiresAt) < new Date()) ? "revoked" : "active";
+    return {
+      id: key.id,
+      label: key.name,
+      maskedKey: key.keyPrefix + "...",
+      keyPrefix: key.keyPrefix,
+      scope: key.scopes.join(", "),
+      lastUsedAt: key.lastUsedAt ?? key.createdAt,
+      createdAt: key.createdAt,
+      status,
+    };
+  });
+}
+
+// Create API key via backend
+async function createApiKey(projectId: string, name: string) {
+  const response = await apiRequest<{ id: string; keyPrefix: string; rawKey: string; name: string; scopes: string[]; createdAt: string }>(`/projects/${projectId}/api-keys`, {
+    method: "POST",
+    body: { name, scopes: ["USAGE_WRITE"] },
+  });
+
+  return {
+    id: response.id,
+    label: response.name,
+    maskedKey: response.keyPrefix + "...",
+    keyPrefix: response.keyPrefix,
+    rawKey: response.rawKey,
+    scope: response.scopes.join(", "),
+    lastUsedAt: response.createdAt,
+    createdAt: response.createdAt,
+    status: "active" as const,
+  };
+}
+
+// Rotate API key via backend
+async function rotateApiKey(projectId: string, keyId: string) {
+  const response = await apiRequest<{ id: string; keyPrefix: string; rawKey: string; name: string; scopes: string[]; createdAt: string }>(`/projects/${projectId}/api-keys/${keyId}/rotate`, {
+    method: "POST",
+  });
+
+  return {
+    id: response.id,
+    label: response.name,
+    maskedKey: response.keyPrefix + "...",
+    keyPrefix: response.keyPrefix,
+    rawKey: response.rawKey,
+    scope: response.scopes.join(", "),
+    lastUsedAt: response.createdAt,
+    createdAt: response.createdAt,
+    status: "active" as const,
+  };
+}
+
+// Revoke API key via backend
+async function revokeApiKey(projectId: string, keyId: string) {
+  await apiRequest(`/projects/${projectId}/api-keys/${keyId}/revoke`, { method: "POST" });
+}
+
 export function ProjectSettingsView() {
   const hydrated = useHydrated();
   const { projectId } = useProject();
@@ -75,7 +149,7 @@ export function ProjectSettingsView() {
         <PageHeader
           eyebrow="Settings"
           title="Project settings"
-          description="Loading the sample configuration stored in this browser."
+          description="Loading project settings and API keys from the backend."
         />
         <Skeleton className="h-96 w-full rounded-xl" />
       </>
@@ -91,8 +165,26 @@ function ProjectSettingsForm({ projectId }: { projectId: string }) {
   const [saved, setSaved] = React.useState<Project>(() => readStoredSettings(projectId) ?? getProject(projectId));
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [section, setSection] = React.useState<SectionId>("general");
+  const [webApiKeys, setWebApiKeys] = React.useState<WebApiKey[]>([]);
+  const [loadingKeys, setLoadingKeys] = React.useState(false);
+  const [newKeyResponse, setNewKeyResponse] = React.useState<WebApiKey | null>(null);
+  const [revokingKeyId, setRevokingKeyId] = React.useState<string | null>(null);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+
+  // Fetch API keys from backend when keys section is opened
+  React.useEffect(() => {
+    if (section === "keys" && webApiKeys.length === 0 && draft) {
+      setLoadingKeys(true);
+      fetchApiKeys(projectId)
+        .then((keys) => setWebApiKeys(keys))
+        .catch((err) => {
+          console.error("Failed to fetch API keys:", err);
+          toast.error("Failed to load API keys", { description: err.message });
+        })
+        .finally(() => setLoadingKeys(false));
+    }
+  }, [section, projectId, webApiKeys]);
 
   function save() {
     const parsed = generalSchema.safeParse({
@@ -426,117 +518,149 @@ function ProjectSettingsForm({ projectId }: { projectId: string }) {
                   API keys
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Ingest keys for this project. Values shown are masked placeholders — no real key exists.
+                  Ingest keys for this project. Keys are stored securely; only masked prefixes are shown.
                 </p>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead scope="col">Label</TableHead>
-                      <TableHead scope="col">Key</TableHead>
-                      <TableHead scope="col">Scope</TableHead>
-                      <TableHead scope="col">Last used</TableHead>
-                      <TableHead scope="col">Status</TableHead>
-                      <TableHead scope="col" className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {draft.apiKeys.map((key) => (
-                      <TableRow key={key.id}>
-                        <TableCell className="text-sm font-medium">{key.label}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{key.maskedKey}</TableCell>
-                        <TableCell className="text-sm">{key.scope}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{formatDateTime(key.lastUsedAt)}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "font-normal",
-                              key.status === "active"
-                                ? "border-success/35 bg-success-soft text-success"
-                                : key.status === "rotating"
-                                  ? "border-warning/40 bg-warning-soft text-warning"
-                                  : "border-border text-muted-foreground",
-                            )}
-                          >
-                            {key.status === "active" ? "Active" : key.status === "rotating" ? "Rotating" : "Revoked"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex justify-end gap-2">
-                            <CopyButton
-                              value={key.maskedKey}
-                              label="Copy masked"
-                              size="sm"
-                              successMessage="Masked key copied — it is only a placeholder"
-                            />
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={key.status === "revoked"}
-                              onClick={() =>
-                                update({
-                                  apiKeys: draft.apiKeys.map((entry) =>
-                                    entry.id === key.id ? { ...entry, status: entry.status === "rotating" ? "active" : "rotating" } : entry,
-                                  ),
-                                })
-                              }
-                            >
-                              {key.status === "rotating" ? "Finish rotation" : "Rotate"}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={key.status === "revoked"}
-                              onClick={() =>
-                                update({
-                                  apiKeys: draft.apiKeys.map((entry) => (entry.id === key.id ? { ...entry, status: "revoked" } : entry)),
-                                })
-                              }
-                            >
-                              Revoke
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              {newKeyResponse ? (
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <h3 className="text-sm font-medium mb-2">New API key created</h3>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Copy this key now — it will never be shown again. Store it securely.
+                  </p>
+                  <div className="font-mono text-sm bg-muted/50 p-3 rounded mb-3 break-all" onClick={() => { if (newKeyResponse.rawKey) navigator.clipboard.writeText(newKeyResponse.rawKey); }}>
+                    {newKeyResponse.rawKey ?? "key unavailable"}
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    if (newKeyResponse.rawKey) {
+                      navigator.clipboard.writeText(newKeyResponse.rawKey);
+                      toast.success("API key copied to clipboard");
+                    }
+                    setNewKeyResponse(null);
+                    // Add the new key to the list
+                    setWebApiKeys((prev) => [...prev, { ...newKeyResponse, rawKey: undefined }]);
+                  }}>
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy key & continue
+                  </Button>
+                </div>
+              ) : loadingKeys ? (
+                <div className="text-center py-8 text-muted-foreground">Loading API keys from backend...</div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto rounded-xl border border-border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead scope="col">Label</TableHead>
+                          <TableHead scope="col">Key</TableHead>
+                          <TableHead scope="col">Scope</TableHead>
+                          <TableHead scope="col">Last used</TableHead>
+                          <TableHead scope="col">Status</TableHead>
+                          <TableHead scope="col" className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {webApiKeys.map((key) => {
+                          const isRevoking = revokingKeyId === key.id;
+                          return (
+                            <TableRow key={key.id}>
+                              <TableCell className="text-sm font-medium">{key.label}</TableCell>
+                              <TableCell className="font-mono text-xs text-muted-foreground">{key.keyPrefix}</TableCell>
+                              <TableCell className="text-sm">{key.scope}</TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {formatDateTime(key.lastUsedAt)}
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "font-normal",
+                                    key.status === "active" || !key.status
+                                      ? "border-success/35 bg-success-soft text-success"
+                                      : "border-border text-muted-foreground",
+                                  )}
+                                >
+                                  {key.status === "active" || !key.status ? "Active" : "Revoked"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex justify-end gap-2">
+                                  <CopyButton
+                                    value={key.keyPrefix}
+                                    label="Copy masked"
+                                    size="sm"
+                                    successMessage="Masked key prefix copied"
+                                  />
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={key.status === "revoked"}
+                                    onClick={async () => {
+                                      try {
+                                        const rotated = await rotateApiKey(projectId, key.id);
+                                        setWebApiKeys((prev) => prev.map((k) => k.id === key.id ? { ...rotated, rawKey: rotated.rawKey } : k));
+                                        setNewKeyResponse(rotated);
+                                        toast.success("API key rotated", { description: "Copy the new key — it won't be shown again." });
+                                      } catch (err) {
+                                        toast.error("Rotation failed", { description: err instanceof Error ? err.message : "Unknown error" });
+                                      }
+                                    }}
+                                  >
+                                    Rotate
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={key.status === "revoked"}
+                                    onClick={async () => {
+                                      setRevokingKeyId(key.id);
+                                      try {
+                                        await revokeApiKey(projectId, key.id);
+                                        setWebApiKeys((prev) => prev.map((k) => k.id === key.id ? { ...k, status: "revoked" as const } : k));
+                                        toast.success("Key revoked");
+                                      } catch (err) {
+                                        toast.error("Revoke failed", { description: err instanceof Error ? err.message : "Unknown error" });
+                                      }
+                                      setRevokingKeyId(null);
+                                    }}
+                                  >
+                                    {isRevoking ? "Revoking..." : "Revoke"}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
 
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const index = draft.apiKeys.length + 1;
-                    update({
-                      apiKeys: [
-                        ...draft.apiKeys,
-                        {
-                          id: "key_sample_" + index,
-                          label: "Sample key " + index,
-                          maskedKey: "aclp_test_••••••••" + String(1000 + index).slice(0, 4),
-                          scope: "Ingest telemetry",
-                          lastUsedAt: new Date().toISOString(),
-                          createdAt: new Date().toISOString(),
-                          status: "active",
-                        },
-                      ],
-                    });
-                    toast.success("Placeholder key added", { description: "It is a masked placeholder; no credential is generated." });
-                  }}
-                >
-                  <PlusIcon data-icon="inline-start" aria-hidden="true" />
-                  Add sample key
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  <ShieldAlertIcon aria-hidden="true" className="mr-1 inline size-3.5 align-[-2px]" />
-                  Never paste a real secret into this prototype.
-                </p>
-              </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const keyName = "SDK Key - " + new Date().toLocaleDateString();
+                        try {
+                          const newKey = await createApiKey(projectId, keyName);
+                          setNewKeyResponse(newKey);
+                          toast.success("API key generated", { description: "Copy it now — it won't be shown again." });
+                        } catch (err) {
+                          toast.error("Failed to generate key", { description: err instanceof Error ? err.message : "Unknown error" });
+                        }
+                      }}
+                    >
+                      <PlusIcon data-icon="inline-start" aria-hidden="true" />
+                      Generate API key
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      <ShieldAlertIcon aria-hidden="true" className="mr-1 inline size-3.5 align-[-2px]" />
+                      Keys are stored securely; only copy and store them immediately.
+                    </p>
+                  </div>
+                </>
+              )}
             </section>
           ) : null}
 
@@ -837,10 +961,6 @@ function ProjectSettingsForm({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      <SampleDataNotice>
-        This page is a working prototype of the settings surface. Edits are stored in your browser&apos;s local storage and are never sent anywhere.
-        No API key, pricing feed, or provider connection is real.
-      </SampleDataNotice>
     </>
   );
 }

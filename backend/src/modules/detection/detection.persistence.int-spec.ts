@@ -261,9 +261,16 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
     };
     const registry = new DetectorRegistry();
     registry.register(detector);
-    const detection = new DetectionService(prisma as unknown as PrismaService, registry, {
+    const config = {
       limits: { defaultPageSize: 25, maxPageSize: 100 },
-    } as Configuration);
+    } as Configuration;
+    const alerts = new AlertsService(prisma as unknown as PrismaService, config);
+    const detection = new DetectionService(
+      prisma as unknown as PrismaService,
+      registry,
+      config,
+      alerts,
+    );
     const dto = {
       detectorType: detector.type,
       projectId,
@@ -296,6 +303,7 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
       where: { organizationId, projectId, title: 'Persisted concurrency test' },
     });
     expect(findings).toHaveLength(1);
+    expect(await prisma.alert.findUnique({ where: { findingId: findings[0].id } })).not.toBeNull();
     const runCount = await prisma.detectionRun.aggregate({
       where: { id: { in: createdRuns.map((run) => run.id) } },
       _sum: { findingsCreated: true },
@@ -372,12 +380,15 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
       run: () => Promise.resolve({ recordsScanned: 0, findings: [] }),
     };
     registry.register(detector);
-    const detection = new DetectionService(prisma as unknown as PrismaService, registry, {
+    const config = {
       limits: { defaultPageSize: 25, maxPageSize: 100 },
-    } as Configuration);
-    const alerts = new AlertsService(
+    } as Configuration;
+    const alerts = new AlertsService(prisma as unknown as PrismaService, config);
+    const detection = new DetectionService(
       prisma as unknown as PrismaService,
-      { limits: { defaultPageSize: 25, maxPageSize: 100 } } as Configuration,
+      registry,
+      config,
+      alerts,
     );
 
     await expect(
@@ -451,9 +462,16 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
     };
     const registry = new DetectorRegistry();
     registry.register(detector);
-    const detection = new DetectionService(prisma as unknown as PrismaService, registry, {
+    const config = {
       limits: { defaultPageSize: 25, maxPageSize: 100 },
-    } as Configuration);
+    } as Configuration;
+    const alerts = new AlertsService(prisma as unknown as PrismaService, config);
+    const detection = new DetectionService(
+      prisma as unknown as PrismaService,
+      registry,
+      config,
+      alerts,
+    );
     const windowStart = new Date('2026-10-22T00:00:00.000Z');
     const windowEnd = new Date('2026-10-23T00:00:00.000Z');
     const run = await detection.triggerRun(

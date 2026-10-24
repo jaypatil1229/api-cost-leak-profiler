@@ -2,14 +2,13 @@ import { format, formatDistanceStrict, parseISO } from "date-fns";
 
 export const SAMPLE_NOW = new Date("2026-09-30T18:00:00");
 
-const currencyFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const currencyFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 10 });
 const currencyCompactFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
 const integerFormatter = new Intl.NumberFormat("en-US");
 const decimalFormatter = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 export function formatCurrency(value: number, options: { compact?: boolean; precise?: boolean } = {}): string {
   if (options.compact && Math.abs(value) >= 10_000) return currencyCompactFormatter.format(value);
-  if (options.precise && Math.abs(value) < 1) return `$${value.toFixed(4)}`;
   return currencyFormatter.format(value);
 }
 

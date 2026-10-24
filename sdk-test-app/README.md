@@ -68,7 +68,7 @@ In Swagger, authorize with a user access token, then call `POST /api/v1/organiza
 }
 ```
 
-Use `RETRY_LOOP`, `UNBOUNDED_CONTEXT`, `OVERSIZED_PROMPT`, or `SPEND_SPIKE` for the other fixtures. Runs are asynchronous; poll `GET /api/v1/organizations/{organizationId}/detection/runs` and then inspect findings. The date above is an example only; use the current date/time window where you are running the app.
+Use `RETRY_LOOP`, `UNBOUNDED_CONTEXT`, `OVERSIZED_PROMPT`, or `SPEND_SPIKE` for the other fixtures. Runs are asynchronous; poll `GET /api/v1/organizations/{organizationId}/detection/runs` until complete, then inspect findings at `GET /api/v1/organizations/{organizationId}/detection/findings` and alerts at `GET /api/v1/organizations/{organizationId}/alerts`. A completed run creates or refreshes an alert for each finding; a run with no findings creates no alert. The date above is an example only; use the current date/time window where you are running the app.
 
 | Scenario in the app | Events produced | Intended detector signal |
 | --- | --- | --- |

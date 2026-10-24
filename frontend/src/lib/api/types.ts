@@ -198,3 +198,18 @@ export interface Member {
   isOwner: boolean;
   joinedAt: string;
 }
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  lastUsedAt: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface ApiKeyWithRaw extends ApiKey {
+  rawKey: string;
+}

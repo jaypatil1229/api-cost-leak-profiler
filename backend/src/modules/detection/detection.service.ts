@@ -25,6 +25,7 @@ import type {
   UpdateFindingStatusDto,
 } from './dto/detection.dto';
 import { DetectorRegistry } from './detectors/detector.registry';
+import { AlertsService } from './alerts.service';
 
 @Injectable()
 export class DetectionService {
@@ -34,6 +35,7 @@ export class DetectionService {
     private readonly prisma: PrismaService,
     private readonly registry: DetectorRegistry,
     @Inject(APP_CONFIG) private readonly config: Configuration,
+    private readonly alertsService: AlertsService,
   ) {}
 
   async triggerRun(
@@ -93,7 +95,7 @@ export class DetectionService {
         windowEnd: dto.windowEnd,
       });
 
-      await this.prisma.$transaction(async (tx) => {
+      const persisted = await this.prisma.$transaction(async (tx) => {
         const persistedFindings = result.findings.map((finding) => {
           const usageRecordIds = [...new Set(finding.usageRecordIds.map((ref) => ref.id))].sort();
           const fingerprint = createFindingFingerprint({
@@ -143,6 +145,16 @@ export class DetectionService {
             })
           : { count: 0 };
 
+        const alerts: Array<{
+          id: string;
+          projectId: string;
+          title: string;
+          description: string;
+          severity: (typeof result.findings)[number]['severity'];
+          evidence: unknown;
+          estimatedRecoverableCost: Prisma.Decimal | null;
+        }> = [];
+
         for (const { finding, fingerprint, usageRecordIds } of persistedFindings) {
           const where = {
             projectId_detectorType_fingerprint: {
@@ -186,6 +198,18 @@ export class DetectionService {
             },
           });
 
+          alerts.push({
+            id: created.id,
+            projectId: dto.projectId,
+            title: finding.title,
+            description: finding.explanation,
+            severity: finding.severity,
+            evidence: finding.evidence,
+            estimatedRecoverableCost: finding.estimatedRecoverableCost
+              ? new Prisma.Decimal(finding.estimatedRecoverableCost)
+              : null,
+          });
+
           await tx.findingUsageLink.deleteMany({ where: { findingId: created.id } });
           if (usageRecordIds.length > 0) {
             await tx.findingUsageLink.createMany({
@@ -199,15 +223,21 @@ export class DetectionService {
           }
         }
 
-        await tx.detectionRun.update({
-          where: { id: runId },
-          data: {
-            status: DetectionRunStatus.COMPLETED,
-            completedAt: new Date(),
-            recordsScanned: result.recordsScanned,
-            findingsCreated: inserted.count,
-          },
-        });
+        return { alerts, findingsCreated: inserted.count };
+      });
+
+      for (const finding of persisted.alerts) {
+        await this.alertsService.createAlertFromFinding(organizationId, finding);
+      }
+
+      await this.prisma.detectionRun.update({
+        where: { id: runId },
+        data: {
+          status: DetectionRunStatus.COMPLETED,
+          completedAt: new Date(),
+          recordsScanned: result.recordsScanned,
+          findingsCreated: persisted.findingsCreated,
+        },
       });
 
       this.logger.log(

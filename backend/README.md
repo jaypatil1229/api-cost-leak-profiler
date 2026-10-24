@@ -294,6 +294,9 @@ All endpoints are under `/api/v1` and return responses in this envelope:
 - `POST /organizations/:organizationId/detection/runs` — Trigger detection run
 - `GET /organizations/:organizationId/detection/findings` — List findings
 - `PATCH /organizations/:organizationId/detection/findings/:findingId/status` — Acknowledge/resolve finding
+- `GET /organizations/:organizationId/alerts` — List alerts created for detected findings
+
+Completed detector runs create or refresh one alert for each persisted finding. Re-running a detector can also create a missing alert for an existing finding without duplicating it.
 
 #### Reports
 - `GET /organizations/:organizationId/reports/overview` — Overview report

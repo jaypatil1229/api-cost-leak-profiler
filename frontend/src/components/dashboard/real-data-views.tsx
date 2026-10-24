@@ -8,13 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader, SectionHeading } from "@/components/shared/page-header";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { EmptyState, ErrorState } from "@/components/shared/empty-state";
 import { MetricTrendChart } from "@/components/charts/trend-chart";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useWorkspace } from "@/components/dashboard/workspace-provider";
 import { useSession } from "@/components/auth/session-provider";
 import { apiRequest, queryString } from "@/lib/api/client";
-import type { Alert, CostReport, DetectionsReport, Finding, Member, OverviewReport, Page, Timeseries, UsageRecord, UsageReport, UsageSummary } from "@/lib/api/types";
+import type { Alert, ApiKey, CostReport, DetectionsReport, Finding, Member, OverviewReport, Page, Timeseries, UsageRecord, UsageReport, UsageSummary } from "@/lib/api/types";
 import { formatCurrency, formatDateTime, formatNumber, formatTokens } from "@/lib/formatters";
 import { useDateRange } from "@/components/shared/date-range-selector";
 
@@ -74,7 +75,7 @@ export function OverviewApiView() {
 
 function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-xl border border-border bg-card p-5"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-medium tracking-tight">{value}</p></div>; }
 
-function Rows({ headers, rows, empty = "No records returned." }: { headers: string[]; rows: string[][]; empty?: string }) {
+function Rows({ headers, rows, empty = "No records returned." }: { headers: string[]; rows: (string | React.ReactNode)[][]; empty?: string }) {
   return <div className="mt-4 overflow-x-auto rounded-xl border border-border"><table className="w-full text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr>{headers.map((header) => <th key={header} className="px-3 py-2 font-medium">{header}</th>)}</tr></thead><tbody>{rows.length ? rows.map((row, index) => <tr key={`${index}-${row[0]}`} className="border-t border-border">{row.map((cell, column) => <td key={`${index}-${column}`} className="max-w-72 px-3 py-2.5 align-top">{cell}</td>)}</tr>) : <tr><td colSpan={headers.length} className="px-3 py-8 text-center text-muted-foreground">{empty}</td></tr>}</tbody></table></div>;
 }
 
@@ -161,16 +162,190 @@ export function ProjectsApiView() {
   const [name, setName] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [managedProjectId, setManagedProjectId] = React.useState<string | null>(null);
+  const [creatingKey, setCreatingKey] = React.useState(false);
+  const [keyName, setKeyName] = React.useState("");
+  const [newlyGeneratedKey, setNewlyGeneratedKey] = React.useState<{ key: string; name: string; scopes: string[] } | null>(null);
+
+  const isManaging = managedProjectId != null;
+
+  const apiKeysForProject = useApiQuery<{ apiKeys: ApiKey[] }>(
+    isManaging ? `/projects/${managedProjectId}/api-keys` : null
+  );
+
   async function create(event: React.FormEvent) {
     event.preventDefault(); if (!workspace.organization) return;
     setPending(true); setError(null);
-    try { await apiRequest(`/organizations/${workspace.organization.id}/projects`, { method: "POST", body: { name, environment: "PRODUCTION" } }); setName(""); await workspace.reloadProjects(); toast.success("Project created"); }
+    try {
+      await apiRequest(`/organizations/${workspace.organization.id}/projects`, { method: "POST", body: { name, environment: "PRODUCTION" } });
+      setName("");
+      await workspace.reloadProjects();
+      toast.success("Project created");
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to create project."); }
     finally { setPending(false); }
   }
-  return <><PageHeader title="Projects" description="Projects available to your authenticated organization membership." />{!workspace.organization ? <WorkspaceRequired /> : <DataState loading={workspace.loading} error={workspace.error} retry={workspace.reloadProjects}><form onSubmit={create} className="flex max-w-lg items-end gap-2"><div className="flex-1"><Label htmlFor="new-project">New project</Label><Input id="new-project" required minLength={2} maxLength={120} value={name} onChange={(e) => setName(e.target.value)} /></div><Button disabled={pending}>{pending ? "Creating…" : "Create"}</Button></form>{error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}<Rows headers={["Project", "Slug", "Environment", "Status", "Created"]} rows={workspace.projects.map((p) => [p.name, p.slug, p.environment, p.status, formatDateTime(p.createdAt)])} empty="No projects yet. Create one above." /></DataState>}</>;
-}
 
+  async function generateApiKey() {
+    if (!managedProjectId) return;
+    setCreatingKey(true);
+    setNewlyGeneratedKey(null);
+    try {
+      const response = await apiRequest<ApiKey & { rawKey: string }>(
+        `/projects/${managedProjectId}/api-keys`,
+        {
+          method: "POST",
+          body: { name: keyName || "New API Key", scopes: ["USAGE_WRITE"] },
+        }
+      );
+      setNewlyGeneratedKey({
+        key: response.rawKey,
+        name: response.name,
+        scopes: response.scopes,
+      });
+      navigator.clipboard.writeText(response.rawKey);
+      toast.success("API key generated!", {
+        description: "Key has been copied to clipboard. Store it securely!",
+      });
+      apiKeysForProject.reload();
+      setKeyName("");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Unable to create API key.";
+      toast.error("Failed to generate API key", { description: message });
+    } finally {
+      setCreatingKey(false);
+    }
+  }
+
+  async function revokeKey(keyId: string) {
+    if (!managedProjectId) return;
+    try {
+      await apiRequest(`/projects/${managedProjectId}/api-keys/${keyId}/revoke`, { method: "POST" });
+      toast.success("API key revoked");
+      apiKeysForProject.reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Unable to revoke key");
+    }
+  }
+
+  async function rotateKey(keyId: string) {
+    if (!managedProjectId) return;
+    try {
+      const response = await apiRequest<ApiKey & { rawKey: string }>(
+        `/projects/${managedProjectId}/api-keys/${keyId}/rotate`,
+        { method: "POST" }
+      );
+      setNewlyGeneratedKey({
+        key: response.rawKey,
+        name: response.name,
+        scopes: response.scopes,
+      });
+      navigator.clipboard.writeText(response.rawKey);
+      toast.success("API key rotated!", {
+        description: "New key has been copied to clipboard. Store it securely!",
+      });
+      apiKeysForProject.reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Unable to rotate key");
+    }
+  }
+
+  return <><PageHeader title="Projects" description="Projects available to your authenticated organization membership." />{!workspace.organization ? <WorkspaceRequired /> : <DataState loading={workspace.loading} error={workspace.error} retry={workspace.reloadProjects}>
+    <form onSubmit={create} className="flex max-w-lg items-end gap-2"><div className="flex-1"><Label htmlFor="new-project">New project</Label><Input id="new-project" required minLength={2} maxLength={120} value={name} onChange={(e) => setName(e.target.value)} /></div><Button disabled={pending || !name.trim()}>{pending ? "Creating…" : "Create"}</Button></form>{error ? <p role="alert" className="text-sm text-destructive mt-2">{error}</p> : null}
+    <div className="mt-6">
+      <Rows
+        headers={["Project", "Slug", "Environment", "Status", "API Keys", "Created"]}
+        rows={workspace.projects.map((p) => {
+          const keyCount = managedProjectId === p.id ? (apiKeysForProject.data?.apiKeys.length ?? 0) : 0;
+          return [
+            p.name,
+            p.slug,
+            p.environment,
+            p.status,
+            <Button key="keys-btn" variant="outline" size="sm" onClick={() => setManagedProjectId(p.id)}>
+              {managedProjectId === p.id ? (apiKeysForProject.loading ? "Loading…" : `${keyCount} key${keyCount !== 1 ? 's' : ''}`) : "Manage"}
+            </Button>,
+            formatDateTime(p.createdAt)
+          ];
+        })}
+        empty="No projects yet. Create one above."
+      />
+    </div>
+  </DataState>}
+
+  {/* API Keys Dialog */}
+  <Dialog open={isManaging} onOpenChange={(open) => { if (!open) setManagedProjectId(null); }}>
+    <DialogContent className="sm:max-w-lg max-h-[90vh] flex flex-col">
+      <DialogHeader>
+        <DialogTitle>API Keys</DialogTitle>
+        <DialogDescription>
+          {managedProjectId ? `${apiKeysForProject.data?.apiKeys.length ?? 0} API key${(apiKeysForProject.data?.apiKeys.length ?? 0) !== 1 ? 's' : ''} for this project` : "Manage API keys for the project."}
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex-1 overflow-y-auto">
+        {newlyGeneratedKey ? (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <Label className="text-sm font-medium mb-2 block">Generated API Key</Label>
+              <div className="font-mono text-sm bg-background p-3 rounded break-all">{newlyGeneratedKey.key}</div>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => { navigator.clipboard.writeText(newlyGeneratedKey.key); toast.success("Key copied to clipboard"); }}>
+                Copy Key
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><Label>Name</Label><p className="font-medium">{newlyGeneratedKey.name}</p></div>
+              <div><Label>Scopes</Label><p className="font-medium">{newlyGeneratedKey.scopes.join(", ")}</p></div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <Button className="w-full" onClick={generateApiKey} disabled={creatingKey || apiKeysForProject.loading}>
+              {creatingKey ? "Generating…" : "Generate New Key"}
+            </Button>
+            {apiKeysForProject.loading ? (
+              <p className="text-center text-muted-foreground">Loading keys…</p>
+            ) : apiKeysForProject.data?.apiKeys.length ? (
+              <div className="space-y-2">
+                {(apiKeysForProject.data.apiKeys).map((key) => (
+                  <div key={key.id} className="border border-border rounded-lg p-3 flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{key.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {key.keyPrefix} • Created: {formatDateTime(key.createdAt)}
+                        {key.revokedAt && <span className="text-destructive"> (Revoked)</span>}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => rotateKey(key.id)}>Rotate</Button>
+                      {!key.revokedAt && (
+                        <Button variant="outline" size="sm" onClick={() => revokeKey(key.id)}>
+                          Revoke
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm py-8 text-center">No API keys for this project.</p>
+            )}
+          </div>
+        )}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => setManagedProjectId(null)}>
+          {newlyGeneratedKey ? "Generate Another" : "Close"}
+        </Button>
+        {newlyGeneratedKey && (
+          <Button onClick={() => setNewlyGeneratedKey(null)}>
+            Generate Another
+          </Button>
+        )}
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+  </>;
+}
 export function OrganizationApiView() {
   const workspace = useWorkspace();
   const { user } = useSession();

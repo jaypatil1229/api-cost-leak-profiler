@@ -62,17 +62,23 @@ describe('DetectionService finding persistence', () => {
       get: jest.fn().mockReturnValue(detector),
       has: jest.fn().mockReturnValue(true),
     };
-    const service = new DetectionService(prisma as never, registry as never, {} as never);
+    const alertsService = { createAlertFromFinding: jest.fn().mockResolvedValue(undefined) };
+    const service = new DetectionService(
+      prisma as never,
+      registry as never,
+      {} as never,
+      alertsService as never,
+    );
     const execute = (
       service as unknown as {
         executeRunAsync: (id: string, orgId: string, input: typeof dto) => Promise<void>;
       }
     ).executeRunAsync.bind(service);
-    return { service, execute, prisma, tx, detector };
+    return { service, execute, prisma, tx, detector, alertsService };
   }
 
   it('stores stable, sorted evidence identity and completes a no-duplicate result', async () => {
-    const { execute, tx } = setup();
+    const { execute, prisma, tx, alertsService } = setup();
     await execute('run-1', 'org-1', dto);
 
     expect(tx.detectionFinding.createMany).toHaveBeenCalledWith(
@@ -102,7 +108,19 @@ describe('DetectionService finding persistence', () => {
     expect(tx.findingUsageLink.deleteMany).toHaveBeenCalledWith({
       where: { findingId: 'finding-1' },
     });
-    expect(tx.detectionRun.update).toHaveBeenLastCalledWith(
+    expect(alertsService.createAlertFromFinding).toHaveBeenCalledWith(
+      'org-1',
+      expect.objectContaining({
+        id: 'finding-1',
+        projectId: dto.projectId,
+        title: finding.title,
+        description: finding.explanation,
+        severity: finding.severity,
+        evidence: finding.evidence,
+        estimatedRecoverableCost: null,
+      }),
+    );
+    expect(prisma.detectionRun.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: DetectionRunStatus.COMPLETED, findingsCreated: 1 }),
       }),
@@ -110,7 +128,7 @@ describe('DetectionService finding persistence', () => {
   });
 
   it('upserts repeated results without resetting lifecycle fields', async () => {
-    const { execute, tx } = setup();
+    const { execute, prisma, tx } = setup();
     tx.detectionFinding.createMany.mockResolvedValue({ count: 0 });
     await execute('run-2', 'org-1', dto);
 
@@ -129,7 +147,7 @@ describe('DetectionService finding persistence', () => {
     expect(upsert.update).not.toHaveProperty('status');
     expect(upsert.update).not.toHaveProperty('acknowledgedAt');
     expect(upsert.update).not.toHaveProperty('resolvedAt');
-    expect(tx.detectionRun.update).toHaveBeenLastCalledWith(
+    expect(prisma.detectionRun.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: DetectionRunStatus.COMPLETED, findingsCreated: 0 }),
       }),
@@ -167,16 +185,36 @@ describe('DetectionService finding persistence', () => {
   });
 
   it('marks an empty successful detector result as completed with zero findings', async () => {
-    const { execute, tx, detector } = setup();
+    const { execute, prisma, tx, detector, alertsService } = setup();
     (detector.run as jest.Mock).mockResolvedValue({ recordsScanned: 0, findings: [] });
     await execute('run-4', 'org-1', dto);
     expect(tx.detectionFinding.createMany).not.toHaveBeenCalled();
-    expect(tx.detectionRun.update).toHaveBeenLastCalledWith(
+    expect(alertsService.createAlertFromFinding).not.toHaveBeenCalled();
+    expect(prisma.detectionRun.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: DetectionRunStatus.COMPLETED,
           recordsScanned: 0,
           findingsCreated: 0,
+        }),
+      }),
+    );
+  });
+
+  it('marks the run failed if alert creation fails after findings are persisted', async () => {
+    const { execute, prisma, alertsService } = setup();
+    alertsService.createAlertFromFinding.mockRejectedValue(new Error('alert storage unavailable'));
+
+    await expect(execute('run-alert-failure', 'org-1', dto)).rejects.toThrow(
+      'alert storage unavailable',
+    );
+
+    expect(prisma.detectionRun.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { id: 'run-alert-failure' },
+        data: expect.objectContaining({
+          status: DetectionRunStatus.FAILED,
+          error: 'Detector execution failed.',
         }),
       }),
     );
