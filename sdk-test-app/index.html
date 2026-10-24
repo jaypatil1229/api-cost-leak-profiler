@@ -19,6 +19,17 @@
         <p id="scenarioHelp" class="help"></p><button id="runScenario" class="secondary">Run selected scenario <span>↗</span></button>
         <p class="micro">Real Gemini API usage may incur charges. The oversized prompt is large by design; use a model that accepts the resulting context.</p>
       </article>
+      <article class="card chatbot"><div class="section-heading"><div><p class="eyebrow">03 · CHATBOT</p><h2>AI Chat Assistant</h2></div><span id="chatConnection" class="pill">Connecting…</span></div>
+        <div id="chatMessages" class="chat-messages"></div>
+        <div class="chat-input-area">
+          <textarea id="chatInput" rows="2" placeholder="Type your message..." maxlength="2000"></textarea>
+          <div class="chat-actions">
+            <button id="clearChat" class="secondary small">Clear Chat</button>
+            <button id="sendChat" class="primary" disabled>Send <span>↗</span></button>
+          </div>
+        </div>
+        <p id="chatMeta" class="micro muted">Connection established. Press Enter to send, Shift+Enter for new line.</p>
+      </article>
       <div class="right-col">
         <article class="card metrics"><div class="section-heading"><div><p class="eyebrow">LIVE LEDGER</p><h2>Usage captured</h2></div><button id="refresh" class="quiet">Refresh</button></div><div class="metric-grid"><div><small>Requests</small><strong id="calls">0</strong></div><div><small>Total tokens</small><strong id="tokens">0</strong></div><div><small>Input tokens</small><strong id="inputTokens">0</strong></div><div><small>Output tokens</small><strong id="outputTokens">0</strong></div></div><div id="byFeature" class="feature-list"></div></article>
         <article class="card result"><div class="section-heading"><div><p class="eyebrow">LATEST RESPONSE</p><h2>Gemini output</h2></div><span id="resultMeta" class="muted">Ready when you are</span></div><pre id="output">Choose a feature or leak scenario to begin.</pre></article>
@@ -26,5 +37,7 @@
     </section>
     <section class="card event-card"><div class="section-heading"><div><p class="eyebrow">INSTRUMENTATION</p><h2>Recent usage events</h2></div><span class="muted">Prompt text is not sent to ACLP</span></div><div class="table-wrap"><table><thead><tr><th>Feature</th><th>Model</th><th>Input</th><th>Output</th><th>Status</th><th>Ingestion</th></tr></thead><tbody id="events"><tr><td colspan="6" class="empty">No events yet.</td></tr></tbody></table></div></section>
     <footer>Demo app · Uses your own Gemini key · ACLP receives metadata only</footer>
-  </main><script src="/app.js" type="module"></script>
-</body></html>
+  </main>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

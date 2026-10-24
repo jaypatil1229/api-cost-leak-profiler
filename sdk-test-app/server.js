@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
-import { resolve, extname } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AclpGemini } from "./sdk.js";
 
@@ -36,6 +36,9 @@ const actions = {
   "interview.prep": (text) => `Create five role-specific interview questions and concise answer guidance.\n\n${text}`,
 };
 
+// Chatbot session tracking for conversation context
+const chatSessions = new Map(); // sessionId -> { messages: [{role, content}], createdAt }
+
 function json(res, status, value) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" });
   res.end(JSON.stringify(value));
@@ -52,6 +55,102 @@ async function body(req) {
 
 async function doCall(featureId, prompt, sessionId, options) {
   return sdk.complete({ featureId, prompt, sessionId, maxTokens: options?.maxTokens ?? 350, status: options?.status ?? "SUCCESS" });
+}
+
+// Chatbot-specific request with conversation context
+async function doChatRequest(sessionId, messages, maxTokens = 250, status = "SUCCESS") {
+  if (!process.env.GEMINI_API_KEY) throw new Error("Set GEMINI_API_KEY in sdk-test-app/.env first.");
+
+  const started = Date.now();
+  let response;
+  let result;
+
+  // Optimize: Send only last 20 messages for context (prevents oversized requests)
+  const maxContextMessages = 20;
+  const recentMessages = messages.slice(-maxContextMessages);
+
+  // Build Gemini-compatible content from conversation history
+  const contents = recentMessages.map((m) => ({
+    role: m.role === "user" ? "user" : "model",
+    parts: [{ text: m.content }],
+  }));
+
+  // Optimization: Add generation config for faster, more efficient responses
+  const generationConfig = {
+    maxOutputTokens: maxTokens,
+    temperature: 0.7, // Balanced speed vs. quality
+    topP: 0.95,
+    topK: 40,
+  };
+
+  try {
+    response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + (process.env.GEMINI_MODEL || "gemini-3.8-flash") + ":generateContent", {
+      method: "POST",
+      headers: {
+        "x-goog-api-key": process.env.GEMINI_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents,
+        generationConfig,
+        systemInstruction: { role: "system", parts: [{ text: "You are a helpful assistant. Answer questions concisely and accurately." }] },
+      }),
+    });
+    result = await response.json();
+    if (!response.ok) throw new Error(result.error?.message || `Gemini returned HTTP ${response.status}`);
+  } catch (error) {
+    // Record error event
+    try {
+      const event = sdk.makeEvent({
+        featureId: "chatbot.request",
+        prompt: messages.map((m) => m.content).join("\n\n"),
+        sessionId,
+        customerUserId: "demo-chat-user",
+        status: "ERROR",
+        latencyMs: Date.now() - started,
+      });
+      sdk.emit(event);
+    } catch (telemetryErr) {
+      // Telemetry failure should not prevent error propagation
+      console.error("[ACLP SDK] Failed to emit error telemetry:", telemetryErr);
+    }
+    throw error;
+  }
+
+  const usage = result.usageMetadata || {};
+  const inputTokens = usage.promptTokenCount ?? 0;
+  const outputTokens = usage.candidatesTokenCount ?? 0;
+  const totalTokens = usage.totalTokenCount ?? (inputTokens + outputTokens);
+
+  // Extract text response
+  const text = (result.candidates || [])
+    .flatMap((c) => (c.content?.parts || []).map((p) => p.text || "").join(""))
+    .join("");
+
+  // Build prompt content for hashing (only messages sent so far)
+  const promptContent = messages.map((m) => m.content).join("\n\n");
+
+  const event = sdk.makeEvent({
+    featureId: "chatbot.request",
+    prompt: promptContent,
+    sessionId,
+    customerUserId: "demo-chat-user",
+    status,
+    model: result.model || process.env.GEMINI_MODEL || "gemini-3.8-flash",
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    latencyMs: Date.now() - started,
+    externalRequestId: result.versionId || result.requestId,
+  });
+  sdk.emit(event);
+
+  return {
+    text: text || "(No response generated)",
+    usage: { inputTokens, outputTokens, totalTokens },
+    model: event.model,
+    event,
+  };
 }
 
 async function runScenario(input) {
@@ -116,6 +215,61 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && path === "/api/status") return json(res, 200, { configured: Boolean(process.env.GEMINI_API_KEY), model: process.env.GEMINI_MODEL || "gemini-3.8-flash", ingestConfigured: Boolean(process.env.ACLP_API_KEY), totals: totals(calls) });
     if (req.method === "GET" && path === "/api/events") return json(res, 200, { events: calls.slice(-250).reverse(), totals: totals(calls) });
+
+    // Chatbot routes
+    if (req.method === "GET" && path === "/api/chat/session") {
+      const sessionId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      chatSessions.set(sessionId, { messages: [], createdAt: new Date().toISOString() });
+      return json(res, 200, { sessionId });
+    }
+
+    if (req.method === "GET" && path.startsWith("/api/chat/session/")) {
+      const sessionId = path.split("/").pop();
+      const session = chatSessions.get(sessionId);
+      if (!session) return json(res, 404, { error: "Session not found" });
+      return json(res, 200, { sessionId, messages: session.messages, createdAt: session.createdAt });
+    }
+
+    if (req.method === "POST" && path === "/api/chat/message") {
+      const data = await body(req);
+      const { sessionId, message, maxTokens } = data;
+
+      if (!sessionId) return json(res, 400, { error: "sessionId is required" });
+      if (!message || typeof message !== "string" || message.trim() === "") {
+        return json(res, 400, { error: "message is required and cannot be empty" });
+      }
+
+      const session = chatSessions.get(sessionId);
+      if (!session) return json(res, 400, { error: "Session not found" });
+
+      // Add user message
+      const userMessage = { role: "user", content: message.trim(), timestamp: new Date().toISOString() };
+      session.messages.push(userMessage);
+
+      try {
+        const result = await doChatRequest(sessionId, session.messages, maxTokens || 500);
+
+        // Add assistant message
+        const assistantMessage = { role: "assistant", content: result.text, timestamp: new Date().toISOString() };
+        session.messages.push(assistantMessage);
+
+        return json(res, 200, {
+          text: result.text,
+          usage: result.usage,
+          model: result.model,
+          eventId: result.event?.eventId,
+        });
+      } catch (error) {
+        return json(res, 500, { error: error.message || "Failed to generate response" });
+      }
+    }
+
+    if (req.method === "DELETE" && path.startsWith("/api/chat/session/")) {
+      const sessionId = path.split("/").pop();
+      chatSessions.delete(sessionId);
+      return json(res, 200, { success: true });
+    }
+
     if (req.method === "POST" && path === "/api/run") return json(res, 200, await runScenario(await body(req)));
     if (req.method === "GET" && path === "/") {
       const html = readFileSync(resolve(root, "index.html"));

@@ -5,12 +5,17 @@
   "type": "module",
   "description": "Standalone Gemini sample app for exercising ACLP usage capture and leak detectors",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js --no-warnings",
+    "typecheck": "node --check server.js && node --check app.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@google/genai": "^2.27.0"
+  },
+  "devDependencies": {
+    "node": "^20.0.0"
   }
 }

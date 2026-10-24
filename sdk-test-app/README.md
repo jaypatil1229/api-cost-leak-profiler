@@ -4,6 +4,43 @@ A small, standalone Gemini app for exercising ACLP usage ingestion and its five 
 
 The demo supports six separately attributed features: resume builder, document creation, document summarization, career coach chatbot, cover letter writer, and interview preparation. The included `sdk.js` is a minimal post-call instrumentation adapter matching the backend's `IngestUsageEventDto` contract. It sends usage metadata to ACLP after each Gemini response; prompt/completion text is not sent to ACLP.
 
+## Chatbot Feature
+
+The app includes an AI chat assistant that demonstrates real-time conversation context and ACLP telemetry capture for multi-turn conversations.
+
+### How to use the chatbot
+
+1. Open <http://localhost:4173> in your browser
+2. The chatbot is available in the third card on the right side of the page (labeled "AI Chat Assistant")
+3. Start typing a message and press Enter to send
+4. Use Shift+Enter for a new line within the message
+5. Click "Clear Chat" to reset the conversation
+
+### How telemetry is sent for chatbot requests
+
+Each chatbot message triggers:
+
+- A `chatbot.request` featureId event sent to ACLP
+- Session identifier linking conversation turns
+- Token usage captured from Gemini's response (up to 250 output tokens by default)
+- SHA-256 prompt hash for privacy (no raw content)
+
+### Performance Optimizations
+
+The chatbot is optimized for faster responses:
+
+- **Reduced maxOutputTokens**: Default 250 tokens (previously 500)
+- **Balanced generation config**: temperature=0.7, topP=0.95, topK=40 for speed/quality balance
+- **Context capping**: Only the 20 most recent messages are sent to Gemini (prevents oversized requests)
+- **Full token usage preserved**: All provider-reported tokens are captured and reported
+
+### Verifying chatbot telemetry in ACLP
+
+1. The chatbot generates events with `featureId: "chatbot.request"`
+2. Open Swagger UI at `http://localhost:3000/api/v1/docs`
+3. Use `GET /api/v1/usage` or `GET /api/v1/usage/summary` for the project
+4. Filter by feature name to see chatbot usage events
+
 ## Run locally
 
 Requirements: Node.js 20+, a Gemini API key, and (for end-to-end ingestion) a running ACLP backend with a configured database.
@@ -57,9 +94,59 @@ For successful calls, the adapter emits:
 
 It posts each event asynchronously to `POST /api/v1/ingest/usage` using `x-api-key`. Failed Gemini calls are emitted with `status: ERROR` and zero tokens because no usage metadata is available. Events are currently sent individually; the app does not implement a durable offline queue or an official Gemini SDK package.
 
+## Testing
+
+Run the tests with:
+
+```bash
+npm test
+```
+
+### Test Coverage
+
+The test suite covers:
+- Chat session creation and retrieval
+- Message validation (empty input, missing session)
+- Telemetry event construction with proper feature identification
+- Privacy guarantees (no raw prompts in telemetry)
+- Error handling and graceful degradation
+- Multi-turn conversation context preservation
+- Configuration limits (message length, etc.)
+
 ## Files
 
-- `server.js` — local app routes, feature prompts, scenario fixtures, and in-memory token dashboard
+- `server.js` — local app routes, feature prompts, scenario fixtures, AI chatbot logic, and in-memory token dashboard
 - `sdk.js` — Gemini call wrapper and ACLP event emission
-- `index.html`, `app.js`, `styles.css` — standalone browser UI
+- `index.html`, `app.js`, `styles.css` — standalone browser UI with chatbot interface
 - `.env.example` — local configuration template
+- `tests/chatbot.test.js` — test suite for chatbot functionality
+
+## Known Limitations
+
+### Token Usage Availability
+
+- Token counts are only available when Gemini returns `usageMetadata` in the response
+- For certain Gemini API endpoints or error conditions, token usage may not be reported
+- When usage is unavailable, the SDK reports zero tokens for that request
+
+### Telemetry Delivery Behavior
+
+- Telemetry is sent asynchronously in the background
+- Events in the in-memory queue may be lost if the process exits unexpectedly
+- The SDK implements retry logic with exponential backoff for transient failures
+- Permanent failures (4xx errors) result in events being dropped
+
+### Chatbot Specific Limitations
+
+- Conversation history is stored in memory and lost on server restart
+- No message persistence across browser sessions (history is client-side only)
+- Maximum message length: 2000 characters
+- Maximum conversation size is bounded by server memory
+- The chatbot uses a system instruction for consistent behavior
+
+### Privacy Guarantees
+
+- Raw prompts and completions are never sent to ACLP
+- Only SHA-256 hashes and character counts are transmitted
+- API keys remain server-side and are never exposed to clients
+- Error messages are sanitized before logging

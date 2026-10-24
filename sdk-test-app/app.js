@@ -45,3 +45,169 @@ $("runFeature").addEventListener("click", (event) => run(event.currentTarget, { 
 $("runScenario").addEventListener("click", (event) => run(event.currentTarget, { feature: features.value, text: $("input").value, scenario: scenario.value }));
 $("refresh").addEventListener("click", refresh);
 status(); refresh(); setInterval(refresh, 5000);
+
+// Chatbot functionality
+let chatSessionId = null;
+let chatMessages = []; // In-memory conversation history for the session
+
+// Chatbot message rendering
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function renderChatMessage(role, content, isCurrent = false) {
+  const container = document.createElement("div");
+  container.className = `chat-message ${role} ${isCurrent ? "generating" : ""}`;
+
+  const roleLabel = document.createElement("span");
+  roleLabel.className = "role-label";
+  roleLabel.textContent = role.charAt(0).toUpperCase() + role.slice(1);
+
+  const contentDiv = document.createElement("div");
+  contentDiv.className = "message-content";
+  contentDiv.innerHTML = escapeHtml(content);
+
+  container.appendChild(roleLabel);
+  container.appendChild(contentDiv);
+
+  return container;
+}
+
+function appendChatMessage(role, content, isCurrent = false) {
+  const messagesContainer = $("chatMessages");
+  const message = renderChatMessage(role, content, isCurrent);
+  messagesContainer.appendChild(message);
+
+  // Auto-scroll to the latest message
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+  if (!isCurrent) {
+    chatMessages.push({ role, content });
+  }
+}
+
+function clearChatMessages() {
+  const messagesContainer = $("chatMessages");
+  messagesContainer.innerHTML = "";
+  chatMessages = [];
+}
+
+async function initializeChatSession() {
+  try {
+    const response = await fetch("/api/chat/session");
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to create session");
+    }
+
+    chatSessionId = data.sessionId;
+    $("chatConnection").textContent = `Connected · ${chatSessionId.slice(0, 8)}`;
+    $("chatConnection").className = "pill good";
+
+    // Add welcome message
+    clearChatMessages();
+    appendChatMessage("assistant", "Hello! I'm your AI assistant. How can I help you today?");
+  } catch (error) {
+    $("chatConnection").textContent = "Connection failed";
+    $("chatConnection").className = "pill bad";
+    console.error("Chat session initialization error:", error);
+  }
+}
+
+async function sendMessage(messageText) {
+  if (!chatSessionId) {
+    await initializeChatSession();
+    if (!chatSessionId) return;
+  }
+
+  const trimmedMessage = messageText.trim();
+  if (!trimmedMessage) return;
+
+  // Add user message to UI
+  appendChatMessage("user", trimmedMessage);
+
+  const sendButton = $("sendChat");
+  const inputField = $("chatInput");
+
+  // Disable while processing
+  sendButton.disabled = true;
+  sendButton.textContent = "Sending…";
+
+  try {
+    const response = await fetch("/api/chat/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: chatSessionId,
+        message: trimmedMessage,
+        maxTokens: 500
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to send message");
+    }
+
+    // Add assistant response
+    appendChatMessage("assistant", data.text, false);
+
+    // Update token counts in the UI
+    if (data.usage) {
+      const eventResponse = await fetch("/api/events");
+      const eventData = await eventResponse.json();
+      render(eventData);
+    }
+
+  } catch (error) {
+    // Display error message in chat
+    appendChatMessage("assistant", `Error: ${error.message || "Failed to get response. Please try again."}`);
+  } finally {
+    // Reset button state
+    sendButton.disabled = false;
+    sendButton.textContent = "Send";
+    inputField.value = "";
+    inputField.focus();
+  }
+}
+
+function clearChat() {
+  if (chatSessionId) {
+    fetch(`/api/chat/session/${chatSessionId}`, { method: "DELETE" }).catch(() => {});
+    chatSessionId = null;
+  }
+  clearChatMessages();
+  initializeChatSession();
+}
+
+// Event listeners for chatbot
+// Initialize on page load
+document.addEventListener("DOMContentLoaded", async () => {
+  await initializeChatSession();
+
+  // Send button click
+  $("sendChat").addEventListener("click", () => {
+    const input = $("chatInput");
+    sendMessage(input.value);
+  });
+
+  // Clear chat button
+  $("clearChat").addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearChat();
+  });
+
+  // Handle Enter/Shift+Enter in textarea
+  $("chatInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const input = $("chatInput");
+      sendMessage(input.value);
+    }
+  });
+});
