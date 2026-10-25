@@ -63,9 +63,16 @@ describe('official SDK live PostgreSQL ingestion', () => {
 
   afterAll(async () => {
     client?.shutdown();
-    if (eventIds.length) await prisma.usageRecord.deleteMany({ where: { projectId, eventId: { in: eventIds } } });
-    if (pricingId) await prisma.modelPricing.delete({ where: { id: pricingId } });
-    await prisma.$disconnect();
+    try {
+      if (projectId && eventIds.length) {
+        await prisma.usageRecord.deleteMany({
+          where: { projectId, eventId: { in: eventIds } },
+        });
+      }
+      if (pricingId) await prisma.modelPricing.delete({ where: { id: pricingId } });
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   it('persists SDK events once, sanitizes metadata, applies pricing, and rejects stale events', async () => {

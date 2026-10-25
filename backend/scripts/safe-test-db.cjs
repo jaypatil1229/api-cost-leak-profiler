@@ -1,7 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { PrismaClient } = require('@prisma/client');
 
 const backendDir = path.resolve(__dirname, '..');
 
@@ -61,6 +60,7 @@ function validateUrl() {
 
 async function verifyIdentity() {
   validateUrl();
+  const { PrismaClient } = require('@prisma/client');
   const prisma = new PrismaClient();
   try {
     const rows =
