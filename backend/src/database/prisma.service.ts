@@ -42,7 +42,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     super({
       datasourceUrl: url ?? UNCONFIGURED_DATABASE_URL,
       log: config.app.isProduction
-        ? [{ emit: 'event', level: 'warn' }, { emit: 'event', level: 'error' }]
+        ? [
+            { emit: 'event', level: 'warn' },
+            { emit: 'event', level: 'error' },
+          ]
         : [
             { emit: 'event', level: 'query' },
             { emit: 'event', level: 'warn' },

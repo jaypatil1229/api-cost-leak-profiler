@@ -96,3 +96,23 @@ def test_health_reports_the_anomaly_detector():
     client=anomaly_client()
     health=client.get("/health").json()
     assert health["anomalyDetector"] == {"ready":True,"name":"isolation_forest","version":"1.0.0","status":"ok"}
+
+
+def test_anomaly_only_service_is_ready_without_loading_embedding_model():
+    settings=Settings(enable_semantic_analysis=False)
+    client=TestClient(create_app(settings,embedding_service=EmbeddingService("unused")))
+    health=client.get("/health").json()
+    assert health["status"] == "ok"
+    assert health["embeddingModel"]["ready"] is False
+    assert health["anomalyDetector"]["ready"] is True
+
+
+def test_semantic_analysis_can_be_disabled_without_sending_prompt_data():
+    settings=Settings(enable_semantic_analysis=False)
+    client=TestClient(create_app(settings,embedding_service=FakeService("fake")))
+    payload={"projectId":"p1","analysisType":"semantic_duplicates","records":[
+        {"requestId":"r1","prompt":"private prompt text"}
+    ]}
+    response=client.post("/api/v1/analyze",json=payload)
+    assert response.status_code == 422
+    assert response.json()["detail"] == "semantic_duplicates analysis is disabled"

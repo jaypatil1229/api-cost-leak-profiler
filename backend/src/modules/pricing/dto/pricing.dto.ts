@@ -1,13 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsBoolean,
-  IsDateString,
-  IsEnum,
-  IsOptional,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Provider } from '@prisma/client';
 
 export class CreateModelPricingDto {
@@ -20,11 +13,17 @@ export class CreateModelPricingDto {
   @MaxLength(120)
   model!: string;
 
-  @ApiProperty({ description: 'Cost per million input tokens as a decimal string.', example: '3.0000000000' })
+  @ApiProperty({
+    description: 'Cost per million input tokens as a decimal string.',
+    example: '3.0000000000',
+  })
   @IsString()
   inputRatePerMillionTokens!: string;
 
-  @ApiProperty({ description: 'Cost per million output tokens as a decimal string.', example: '15.0000000000' })
+  @ApiProperty({
+    description: 'Cost per million output tokens as a decimal string.',
+    example: '15.0000000000',
+  })
   @IsString()
   outputRatePerMillionTokens!: string;
 

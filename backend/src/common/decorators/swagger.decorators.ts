@@ -30,7 +30,7 @@ function envelopeSchema(model: ModelType | undefined, isArray = false): SchemaOb
     properties: {
       success: { type: 'boolean', example: true },
       data: dataSchema,
-      meta: { $ref: getSchemaPath(ResponseMetaDto) } as any,
+      meta: { $ref: getSchemaPath(ResponseMetaDto) },
     },
   };
 }

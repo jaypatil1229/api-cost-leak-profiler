@@ -40,12 +40,7 @@ export class OrganizationsService {
     });
   }
 
-  async create(input: {
-    name: string;
-    slug?: string;
-    userId: string;
-    actor: AuditActor;
-  }) {
+  async create(input: { name: string; slug?: string; userId: string; actor: AuditActor }) {
     const finalSlug = input.slug || slugify(input.name) || `org-${Date.now()}`;
 
     const existing = await this.prisma.organization.findUnique({ where: { slug: finalSlug } });
@@ -95,12 +90,7 @@ export class OrganizationsService {
     return result;
   }
 
-  async update(input: {
-    organizationId: string;
-    name?: string;
-    slug?: string;
-    actor: AuditActor;
-  }) {
+  async update(input: { organizationId: string; name?: string; slug?: string; actor: AuditActor }) {
     if (input.slug) {
       const existing = await this.prisma.organization.findFirst({
         where: { slug: input.slug, id: { not: input.organizationId } },
@@ -234,11 +224,7 @@ export class OrganizationsService {
     }));
   }
 
-  async removeMember(input: {
-    organizationId: string;
-    membershipId: string;
-    actor: AuditActor;
-  }) {
+  async removeMember(input: { organizationId: string; membershipId: string; actor: AuditActor }) {
     await this.prisma.$transaction(async (tx) => {
       const membership = await tx.organizationMembership.findUnique({
         where: { id: input.membershipId },

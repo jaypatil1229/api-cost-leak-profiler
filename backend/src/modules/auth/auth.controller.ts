@@ -137,9 +137,7 @@ export class AuthController {
       tokenType: 'Bearer',
       expiresIn: result.expiresInSeconds,
       refreshToken: result.refreshToken,
-      refreshTokenExpiresAt: new Date(
-        Date.now() + result.expiresInSeconds * 1000,
-      ).toISOString(),
+      refreshTokenExpiresAt: new Date(Date.now() + result.expiresInSeconds * 1000).toISOString(),
     };
 
     return { tokens };
@@ -179,10 +177,7 @@ export class AuthController {
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: RequestContext,
   ): Promise<LogoutResponseDto> {
-    const revokedSessions = await this.authService.logoutAll(
-      user.id,
-      auditActorFromRequest(req),
-    );
+    const revokedSessions = await this.authService.logoutAll(user.id, auditActorFromRequest(req));
     return { revokedSessions };
   }
 

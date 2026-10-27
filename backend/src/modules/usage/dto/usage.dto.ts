@@ -5,12 +5,18 @@ import { CallStatus, CostStatus, Provider } from '@prisma/client';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 
 export class UsageQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ format: 'date-time', description: 'Filter from this timestamp (inclusive).' })
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description: 'Filter from this timestamp (inclusive).',
+  })
   @IsOptional()
   @IsISO8601()
   from?: string;
 
-  @ApiPropertyOptional({ format: 'date-time', description: 'Filter to this timestamp (exclusive).' })
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description: 'Filter to this timestamp (exclusive).',
+  })
   @IsOptional()
   @IsISO8601()
   to?: string;
@@ -113,7 +119,10 @@ export class UsageRecordResponseDto {
   @ApiPropertyOptional({ nullable: true })
   sessionId!: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Estimated cost in USD. Null when pricing unavailable.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Estimated cost in USD. Null when pricing unavailable.',
+  })
   estimatedInputCost!: string | null;
 
   @ApiPropertyOptional({ nullable: true })

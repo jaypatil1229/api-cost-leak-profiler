@@ -60,7 +60,10 @@ export class ApiKeyVerificationService {
     });
 
     // Same error for "no such prefix" and "wrong secret".
-    if (!record || !verifyApiKeySecret(parsed.secret, record.keyHash, this.config.auth.apiKeyHmacSecret)) {
+    if (
+      !record ||
+      !verifyApiKeySecret(parsed.secret, record.keyHash, this.config.auth.apiKeyHmacSecret)
+    ) {
       throw new UnauthorizedAppException('API key is invalid.', ErrorCode.API_KEY_INVALID);
     }
 

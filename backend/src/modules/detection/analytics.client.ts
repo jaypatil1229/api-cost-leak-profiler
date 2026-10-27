@@ -38,6 +38,55 @@ export class AnalyticsClient {
   constructor(@Inject(APP_CONFIG) private readonly config: Configuration) {
     this.enabled = config.analytics.enabled;
   }
+
+  async checkHealth(): Promise<{
+    status: 'up' | 'down';
+    latencyMs: number;
+    detail?: string;
+  }> {
+    const { url, timeoutMs } = this.config.analytics;
+    if (!url)
+      return { status: 'down', latencyMs: 0, detail: 'Analytics service URL is not configured.' };
+
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url.replace(/\/+$/, '') + '/health', {
+        signal: controller.signal,
+      });
+      const latencyMs = Date.now() - startedAt;
+      if (!response.ok) {
+        return {
+          status: 'down',
+          latencyMs,
+          detail: 'Analytics health endpoint returned HTTP ' + response.status + '.',
+        };
+      }
+
+      const payload: unknown = await response.json();
+      if (
+        !obj(payload) ||
+        !obj(payload.anomalyDetector) ||
+        payload.anomalyDetector.ready !== true
+      ) {
+        return { status: 'down', latencyMs, detail: 'Isolation Forest is not ready.' };
+      }
+      return { status: 'up', latencyMs };
+    } catch (error) {
+      return {
+        status: 'down',
+        latencyMs: Date.now() - startedAt,
+        detail:
+          error instanceof Error && error.name === 'AbortError'
+            ? 'Analytics health check timed out.'
+            : 'Analytics health endpoint is unreachable.',
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async analyze(input: {
     projectId: string;
     analysisType: AnalyticsResponse['analysisType'];

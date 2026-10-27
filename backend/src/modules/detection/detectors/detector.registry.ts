@@ -13,7 +13,9 @@ export class DetectorRegistry {
       this.logger.warn(`Overwriting detector registration for ${detector.type}`);
     }
     this.detectors.set(detector.type, detector);
-    this.logger.log(`Registered detector: ${detector.type} (${detector.kind}, v${detector.version})`);
+    this.logger.log(
+      `Registered detector: ${detector.type} (${detector.kind}, v${detector.version})`,
+    );
   }
 
   get(type: DetectorType): Detector | undefined {
@@ -32,7 +34,12 @@ export class DetectorRegistry {
     return this.detectors.has(type);
   }
 
-  listRegistered(): Array<{ type: DetectorType; kind: DetectorKind; version: string; description: string }> {
+  listRegistered(): Array<{
+    type: DetectorType;
+    kind: DetectorKind;
+    version: string;
+    description: string;
+  }> {
     return this.getAll().map((d) => ({
       type: d.type,
       kind: d.kind,

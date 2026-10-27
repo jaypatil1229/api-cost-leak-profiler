@@ -8,6 +8,7 @@ import { ApiOkEnvelope } from '../../common/decorators/swagger.decorators';
 import { APP_CONFIG } from '../../config/config.module';
 import type { Configuration } from '../../config/configuration';
 import { PrismaService } from '../../database/prisma.service';
+import { AnalyticsClient } from '../detection/analytics.client';
 
 import {
   type DependencyHealthDto,
@@ -20,6 +21,7 @@ import {
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly analyticsClient: AnalyticsClient,
     @Inject(APP_CONFIG) private readonly config: Configuration,
   ) {}
 
@@ -66,7 +68,12 @@ export class HealthController {
     description: 'Ready. A 503 with the same body shape is returned when not ready.',
   })
   async ready(@Res({ passthrough: true }) response: Response): Promise<ReadinessResponseDto> {
-    const database = await this.prisma.checkHealth();
+    const [database, analytics] = await Promise.all([
+      this.prisma.checkHealth(),
+      this.config.analytics.enabled
+        ? this.analyticsClient.checkHealth()
+        : Promise.resolve({ status: 'not_configured' as const, latencyMs: null }),
+    ]);
 
     const databaseHealth: DependencyHealthDto = {
       status: !database.configured ? 'not_configured' : database.connected ? 'up' : 'down',
@@ -85,10 +92,11 @@ export class HealthController {
       apiVersion: API_VERSION,
       database: databaseHealth,
       analytics: {
-        // Not probed: reachability of an optional dependency is checked lazily
-        // by AnalyticsClientService when a route actually needs it.
-        status: this.config.analytics.enabled ? 'up' : 'not_configured',
-        latencyMs: null,
+        status: analytics.status,
+        latencyMs: analytics.latencyMs,
+        ...('detail' in analytics && analytics.detail && !this.config.app.isProduction
+          ? { detail: analytics.detail }
+          : {}),
       },
       timestamp: new Date().toISOString(),
     };

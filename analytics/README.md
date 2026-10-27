@@ -26,14 +26,32 @@ python -m venv .venv
 # Activate .venv, then:
 pip install -e ".[test]"
 cp .env.example .env
+```
+
+Install the optional semantic-analysis dependency only when enabling prompt embeddings:
+
+```bash
+pip install -e ".[test,semantic]"
 uvicorn app.main:app --reload
 ```
 
-Windows PowerShell uses `Copy-Item .env.example .env`. On first startup the model is downloaded from Hugging Face and cached. Run `docker build -t aclp-analytics .` and `docker run --env-file .env -p 8000:8000 aclp-analytics` for Docker.
+Windows PowerShell uses `Copy-Item .env.example .env`. For the local app integration, create a random shared key and configure the same value as `ANALYTICS_SERVICE_KEY` in `analytics/.env` and `ANALYTICS_SERVICE_TOKEN` in `backend/.env`. Generate it locally with `python -c "import secrets; print(secrets.token_hex(32))"`; do not commit either `.env` file.
+
+Start the anomaly-only service from this directory:
+
+```powershell
+docker compose --env-file .env -f docker-compose.yml up -d --build
+Invoke-RestMethod http://127.0.0.1:8000/health
+```
+
+The compose service binds only to loopback, requires the shared key, and runs with `ENABLE_SEMANTIC_ANALYSIS=false`. Isolation Forest therefore runs without installing, downloading, or loading the prompt-embedding dependency. The internal analysis endpoint still requires the shared key. To stop the service, run `docker compose --env-file .env -f docker-compose.yml down`.
+
+Without Docker, start `uvicorn app.main:app --reload` after setting the same environment variables. With semantic analysis enabled, the embedding model is loaded at startup and cached locally.
 
 ## Configuration
 
 - `APP_ENV`, `APP_VERSION`, `LOG_LEVEL`
+- `ENABLE_SEMANTIC_ANALYSIS`: defaults to true; set false for anomaly-only operation without loading the prompt embedding model
 - `EMBEDDING_MODEL_NAME`: defaults to `sentence-transformers/all-MiniLM-L6-v2`
 - `SEMANTIC_SIMILARITY_THRESHOLD`: default 0.80, range [-1, 1]
 - `MAX_SEMANTIC_RECORDS`: default 5000; over-limit requests receive HTTP 422
@@ -66,7 +84,9 @@ Example body:
 
 Response includes `projectId`, `analysisType`, `findings`, `summary`, and `metadata`. Each finding includes IDs, type, severity, cosine score, related request IDs, evidence (score, configured threshold, detector, reason), recommendation, and optional impact (left null; backend owns cost aggregation). Cosine similarity is not a probability. Severity is a default medium policy for all threshold-crossing pairs and can be revised independently.
 
-`GET /health` returns service version and model readiness/name/dimension. It reports degraded while model loading failed. Production must set `ANALYTICS_SERVICE_KEY`; send it in `X-Internal-Service-Key`. In development, an unset key explicitly disables the check. Never expose this internal API directly to browsers.
+`GET /health` returns service version and individual embedding/anomaly detector readiness. Overall status is `ok` when either enabled analysis capability is ready. Production must set `ANALYTICS_SERVICE_KEY`; send it in `X-Internal-Service-Key`. In development, an unset key disables the check, so configure a key and keep the API bound to loopback or a trusted private network. Never expose this internal API directly to browsers.
+
+When `ENABLE_SEMANTIC_ANALYSIS=false`, direct `semantic_duplicates` requests are rejected and `all` requests skip semantic analysis. This does not collect, persist, or transmit prompts; the backend's Isolation Forest adapter sends only numeric usage features and non-content identifiers.
 
 ## Detection and scaling
 
@@ -146,4 +166,3 @@ Measured synthetic threshold results:
 | 0.85 | 2 | 4 | 3 | 0.333 | 0.400 |
 | 0.90 | 2 | 4 | 3 | 0.333 | 0.400 |
 | 0.95 | 2 | 4 | 3 | 0.333 | 0.400 |
-

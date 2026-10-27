@@ -1,14 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsDate,
-  IsEnum,
-  IsIn,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-} from 'class-validator';
+import { IsDate, IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import {
   AlertCategory,
   AlertStatus,
@@ -117,8 +109,20 @@ export class FindingQueryDto extends PaginationQueryDto {
 }
 
 export class UpdateFindingStatusDto {
-  @ApiProperty({ enum: [FindingStatus.ACKNOWLEDGED, FindingStatus.RESOLVED, FindingStatus.DISMISSED, FindingStatus.FALSE_POSITIVE] })
-  @IsIn([FindingStatus.ACKNOWLEDGED, FindingStatus.RESOLVED, FindingStatus.DISMISSED, FindingStatus.FALSE_POSITIVE])
+  @ApiProperty({
+    enum: [
+      FindingStatus.ACKNOWLEDGED,
+      FindingStatus.RESOLVED,
+      FindingStatus.DISMISSED,
+      FindingStatus.FALSE_POSITIVE,
+    ],
+  })
+  @IsIn([
+    FindingStatus.ACKNOWLEDGED,
+    FindingStatus.RESOLVED,
+    FindingStatus.DISMISSED,
+    FindingStatus.FALSE_POSITIVE,
+  ])
   status!: FindingStatus;
 
   @ApiPropertyOptional({ maxLength: 1000 })

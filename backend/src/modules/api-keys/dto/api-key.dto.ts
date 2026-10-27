@@ -37,7 +37,10 @@ export class ApiKeyResponseDto {
   @ApiProperty({ example: 'Production SDK Key' })
   name!: string;
 
-  @ApiProperty({ example: 'aclp_a7k3m9x2qp4t…', description: 'Public key prefix with ellipsis. Never shows the secret.' })
+  @ApiProperty({
+    example: 'aclp_a7k3m9x2qp4t…',
+    description: 'Public key prefix with ellipsis. Never shows the secret.',
+  })
   keyPrefix!: string;
 
   @ApiProperty({ enum: ApiKeyScope, enumName: 'ApiKeyScope', isArray: true })

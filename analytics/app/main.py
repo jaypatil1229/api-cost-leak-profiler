@@ -27,14 +27,19 @@ def create_app(
     detector = SemanticDuplicateDetector(embedding_service, settings.semantic_similarity_threshold,
                                          settings.max_semantic_records)
     anomaly_service = anomaly_service or build_anomaly_service(settings)
-    analysis_service = analysis_service or AnalysisService(detector, anomaly_service)
+    analysis_service = analysis_service or AnalysisService(
+        detector,
+        anomaly_service,
+        semantic_enabled=settings.enable_semantic_analysis,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        try:
-            embedding_service.load_model()
-        except Exception:
-            logging.getLogger(__name__).exception("embedding model failed to load")
+        if settings.enable_semantic_analysis:
+            try:
+                embedding_service.load_model()
+            except Exception:
+                logging.getLogger(__name__).exception("embedding model failed to load")
         yield
 
     app = FastAPI(title="ACLP Analytics", version=settings.app_version, lifespan=lifespan)

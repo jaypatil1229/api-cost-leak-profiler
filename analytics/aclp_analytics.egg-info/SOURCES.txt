@@ -14,6 +14,9 @@ app/api/routes/analysis.py
 app/api/routes/health.py
 app/config/__init__.py
 app/config/settings.py
+app/detectors/__init__.py
+app/detectors/isolation_forest.py
+app/detectors/severity.py
 app/embeddings/__init__.py
 app/embeddings/service.py
 app/features/__init__.py
@@ -29,5 +32,6 @@ app/semantic/normalizer.py
 app/semantic/similarity.py
 app/services/__init__.py
 app/services/analysis_service.py
+app/services/anomaly_service.py
 app/utils/__init__.py
 app/utils/logging.py

@@ -13,9 +13,7 @@ export const PrismaErrorCode = {
   TRANSACTION_CONFLICT: 'P2034',
 } as const;
 
-export function isPrismaKnownError(
-  error: unknown,
-): error is Prisma.PrismaClientKnownRequestError {
+export function isPrismaKnownError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
   return error instanceof Prisma.PrismaClientKnownRequestError;
 }
 
@@ -34,7 +32,8 @@ export function isRecordNotFoundError(error: unknown): boolean {
 export function isConnectionError(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientInitializationError ||
-    (isPrismaKnownError(error) && ['P1000', 'P1001', 'P1002', 'P1003', 'P1017'].includes(error.code))
+    (isPrismaKnownError(error) &&
+      ['P1000', 'P1001', 'P1002', 'P1003', 'P1017'].includes(error.code))
   );
 }
 

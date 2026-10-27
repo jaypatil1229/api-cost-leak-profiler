@@ -13,7 +13,7 @@ import { toast } from "sonner";
 
 interface ApiKey {
   id: string;
-  key: string;
+  rawKey: string;
   name: string;
   scopes: string[];
   expiresAt: string | null;
@@ -50,7 +50,7 @@ export default function ApiKeyGeneratorPage() {
       );
 
       setGeneratedKey(response as ApiKey);
-      navigator.clipboard.writeText((response as any).key || "");
+      navigator.clipboard.writeText((response as any).rawKey || "");
       toast.success("API key generated!", {
         description: "Key has been copied to clipboard. Store it securely!",
       });
@@ -135,13 +135,13 @@ export default function ApiKeyGeneratorPage() {
               <div className="space-y-2">
                 <Label>Generated API Key</Label>
                 <div className="p-3 bg-muted rounded-lg font-mono text-sm break-all">
-                  {generatedKey.key}
+                  {generatedKey.rawKey}
                 </div>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    navigator.clipboard.writeText(generatedKey.key);
+                    navigator.clipboard.writeText(generatedKey.rawKey);
                     toast.success("Key copied to clipboard");
                   }}
                 >

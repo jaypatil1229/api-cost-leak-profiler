@@ -2,9 +2,7 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { CurrentOrganization } from '../../common/decorators/context.decorators';
-import {
-  RequireOrgMembership,
-} from '../../common/decorators/authorization.decorators';
+import { RequireOrgMembership } from '../../common/decorators/authorization.decorators';
 import {
   ApiOkEnvelope,
   ApiPaginatedEnvelope,
@@ -34,7 +32,7 @@ export class UsageController {
     description:
       'Returns paginated usage records scoped to the organization. Supports filtering by project, provider, model, date range, and attribution dimensions.',
   })
-  @ApiPaginatedEnvelope(UsageRecordResponseDto as any)
+  @ApiPaginatedEnvelope(UsageRecordResponseDto)
   @ApiStandardErrors({ notFound: true })
   async list(
     @Query() query: UsageQueryDto,
@@ -46,8 +44,7 @@ export class UsageController {
   @Get('summary')
   @ApiOperation({
     summary: 'Get usage summary',
-    description:
-      'Returns aggregate totals (event count, tokens, cost) for the given time range.',
+    description: 'Returns aggregate totals (event count, tokens, cost) for the given time range.',
   })
   @ApiOkEnvelope()
   @ApiStandardErrors()
@@ -77,7 +74,7 @@ export class UsageController {
     return this.usageService.getTimeseries(orgContext.organizationId, {
       from: query.from,
       to: query.to,
-      granularity: query.granularity as any,
+      granularity: query.granularity,
       projectId: query.projectId,
     });
   }

@@ -1,14 +1,8 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
-import {
-  RequireProjectRole,
-} from '../../common/decorators/authorization.decorators';
-import {
-  CurrentProject,
-  CurrentUser,
-  Req,
-} from '../../common/decorators/context.decorators';
+import { RequireProjectRole } from '../../common/decorators/authorization.decorators';
+import { CurrentProject, CurrentUser, Req } from '../../common/decorators/context.decorators';
 import {
   ApiCreatedEnvelope,
   ApiOkEnvelope,
@@ -109,7 +103,8 @@ export class ApiKeysController {
   @RequireProjectRole(OrgRole.MEMBER)
   @ApiOperation({
     summary: 'Revoke API key',
-    description: 'Revokes an API key. SDK requests with this key will be rejected. Requires MEMBER role or higher.',
+    description:
+      'Revokes an API key. SDK requests with this key will be rejected. Requires MEMBER role or higher.',
   })
   @ApiOkEnvelope()
   @ApiStandardErrors({ notFound: true })

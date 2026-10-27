@@ -12,7 +12,11 @@ import {
   ApiStandardErrors,
 } from '../../common/decorators/swagger.decorators';
 import { OrganizationParamDto } from '../../common/dto/params.dto';
-import type { AuthenticatedUser, OrganizationContext, RequestContext } from '../../common/types/request-context';
+import type {
+  AuthenticatedUser,
+  OrganizationContext,
+  RequestContext,
+} from '../../common/types/request-context';
 import { auditActorFromRequest } from '../../common/types/request-context';
 import { OrgRole } from '@prisma/client';
 
@@ -149,7 +153,9 @@ export class OrganizationsController {
   @ApiOperation({ summary: 'List organization members' })
   @ApiOkEnvelope()
   @ApiStandardErrors()
-  async listMembers(@Param() params: OrganizationParamDto): Promise<{ members: MemberResponseDto[] }> {
+  async listMembers(
+    @Param() params: OrganizationParamDto,
+  ): Promise<{ members: MemberResponseDto[] }> {
     const members = await this.organizationsService.listMembers(params.organizationId);
 
     return {
@@ -170,7 +176,8 @@ export class OrganizationsController {
   @RequireOrgRole(OrgRole.ADMIN)
   @ApiOperation({
     summary: 'Remove member',
-    description: 'Removes a member from the organization. Cannot remove the owner. Requires ADMIN role or higher.',
+    description:
+      'Removes a member from the organization. Cannot remove the owner. Requires ADMIN role or higher.',
   })
   @ApiOkEnvelope()
   @ApiStandardErrors({ notFound: true })

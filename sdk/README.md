@@ -22,18 +22,18 @@ Start the ACLP backend and create a user, organization, project, and API key:
 
 ```bash
 # Register
-curl -X POST http://localhost:3000/api/v1/auth/register \
+curl -X POST http://localhost:4000/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"dev@example.com","password":"StrongPass!123","name":"Dev User"}'
 
 # Create project (use your organizationId from the registration response)
-curl -X POST http://localhost:3000/api/v1/organizations/<orgId>/projects \
+curl -X POST http://localhost:4000/api/v1/organizations/<orgId>/projects \
   -H "Authorization: Bearer <accessToken>" \
   -H "Content-Type: application/json" \
-  -d '{"name":"My App","slug":"my-app","environmentCount":1}'
+  -d '{"name":"My App","slug":"my-app"}'
 
 # Create API key (use projectId from above)
-curl -X POST http://localhost:3000/api/v1/projects/<projectId>/api-keys \
+curl -X POST http://localhost:4000/api/v1/projects/<projectId>/api-keys \
   -H "Authorization: Bearer <accessToken>" \
   -H "Content-Type: application/json" \
   -d '{"name":"sdk-key","scopes":["USAGE_WRITE"]}'

@@ -37,7 +37,7 @@ The chatbot is optimized for faster responses:
 ### Verifying chatbot telemetry in ACLP
 
 1. The chatbot generates events with `featureId: "chatbot.request"`
-2. Open Swagger UI at `http://localhost:3000/api/v1/docs`
+2. Open Swagger UI at <http://localhost:4000/api/v1/docs>
 3. Use `GET /api/v1/usage` or `GET /api/v1/usage/summary` for the project
 4. Filter by feature name to see chatbot usage events
 
@@ -46,12 +46,12 @@ The chatbot is optimized for faster responses:
 Requirements: Node.js 20+, a Gemini API key, and (for end-to-end ingestion) a running ACLP backend with a configured database.
 
 1. Copy `.env.example` to `.env` and set `GEMINI_API_KEY`. Optionally change `GEMINI_MODEL`.
-2. Set `ACLP_API_KEY` to a project API key with `USAGE_WRITE` scope. Set `ACLP_INGEST_URL` if the backend is not at `http://localhost:3000`.
+2. Set `ACLP_API_KEY` to a project API key with `USAGE_WRITE` scope. Set `ACLP_INGEST_URL` if the backend is not at `http://localhost:4000` (default is `http://localhost:4000/api/v1/ingest/usage`).
 3. From this directory, run `npm start` and open <http://localhost:4173>.
 
 The app calls Gemini's Interactions API directly from its local Node server, using `store: false` so provider interactions are not retained. The API key stays server-side. Without an ACLP API key, Gemini requests still run and local token totals are shown, but events are not ingested. The backend requires a database connection for persistence. Configure `GEMINI` model pricing in ACLP if you also want cost estimates; without a matching pricing row events remain `PENDING_PRICING`.
 
-To prepare ACLP, start its backend, register/sign in, create an organization and project, then create a project API key with `USAGE_WRITE`. The API key is displayed once when created. See [backend setup](../backend/README.md) and the Swagger UI at `http://localhost:3000/api/v1/docs`.
+To prepare ACLP, start its backend, register/sign in, create an organization and project, then create a project API key with `USAGE_WRITE`. The API key is displayed once when created. See [backend setup](../backend/README.md) and the Swagger UI at <http://localhost:4000/api/v1/docs>.
 
 ## Scenarios and detector evidence
 

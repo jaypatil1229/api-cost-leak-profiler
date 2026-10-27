@@ -11,7 +11,10 @@ import { TimeGranularity, type TimeGranularityValue } from '../utils/time-range.
  * exclusive. When omitted, endpoints default to a documented trailing window.
  */
 export class DateRangeQueryDto {
-  @ApiPropertyOptional({ format: 'uuid', description: 'Optional project scope. Membership is still checked by the backend.' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Optional project scope. Membership is still checked by the backend.',
+  })
   @IsOptional()
   @IsUUID()
   projectId?: string;

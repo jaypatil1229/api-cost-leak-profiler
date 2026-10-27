@@ -48,7 +48,10 @@ export class SpendSpikeDetector implements Detector {
     const previousCost = previousAgg._sum.estimatedTotalCost ?? new Prisma.Decimal(0);
     const findings: DetectorResult['findings'] = [];
 
-    if (!previousCost.isZero() && currentCost.dividedBy(previousCost).greaterThan(SPIKE_THRESHOLD_MULTIPLIER)) {
+    if (
+      !previousCost.isZero() &&
+      currentCost.dividedBy(previousCost).greaterThan(SPIKE_THRESHOLD_MULTIPLIER)
+    ) {
       const excess = currentCost.minus(previousCost);
       findings.push({
         title: `Spend spike: ${SPIKE_THRESHOLD_MULTIPLIER}x+ increase over previous window`,

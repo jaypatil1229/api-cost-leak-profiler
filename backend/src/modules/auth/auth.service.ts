@@ -177,11 +177,7 @@ export class AuthService {
     };
   }
 
-  async login(input: {
-    email: string;
-    password: string;
-    actor: AuditActor;
-  }): Promise<LoginResult> {
+  async login(input: { email: string; password: string; actor: AuditActor }): Promise<LoginResult> {
     const email = normalizeEmail(input.email);
     const user = await this.prisma.user.findUnique({
       where: { email },
@@ -264,7 +260,10 @@ export class AuthService {
     });
 
     if (!existing || existing.expiresAt.getTime() <= now.getTime()) {
-      throw new UnauthorizedAppException('Refresh token is invalid or expired.', ErrorCode.TOKEN_EXPIRED);
+      throw new UnauthorizedAppException(
+        'Refresh token is invalid or expired.',
+        ErrorCode.TOKEN_EXPIRED,
+      );
     }
 
     if (existing.revokedAt || existing.replacedById) {

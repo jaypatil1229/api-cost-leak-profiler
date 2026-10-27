@@ -17,7 +17,7 @@ def health(request: Request):
         "status": STATUS_OK if detector is not None else "not_configured",
     }
     return {
-        "status": "ok" if info["ready"] else "degraded",
+        "status": "ok" if info["ready"] or anomaly["ready"] else "degraded",
         "serviceVersion": request.app.state.settings.app_version,
         "embeddingModel": info,
         "anomalyDetector": anomaly,

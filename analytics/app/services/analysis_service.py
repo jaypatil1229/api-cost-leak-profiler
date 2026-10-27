@@ -20,11 +20,12 @@ class UnsupportedAnalysisError(Exception):
 class AnalysisService:
     """Runs the requested analysis type and shapes summary and metadata."""
 
-    def __init__(self, detector, anomaly_service=None):
+    def __init__(self, detector, anomaly_service=None, semantic_enabled=True):
         # ``detector`` stays the semantic duplicate detector for backwards
         # compatibility with existing wiring and tests.
         self.detector = detector
         self.anomaly_service = anomaly_service
+        self.semantic_enabled = semantic_enabled
 
     def analyze(self, request) -> AnalysisResponse:
         analysis_type = request.analysis_type
@@ -47,6 +48,8 @@ class AnalysisService:
         )
 
     def _semantic(self, records):
+        if not self.semantic_enabled:
+            raise UnsupportedAnalysisError("semantic_duplicates analysis is disabled")
         if not records or not any((record.prompt or "").strip() for record in records):
             raise ValueError("records must contain at least one usable prompt")
         findings, metadata = self.detector.detect(records)
@@ -83,7 +86,9 @@ class AnalysisService:
             "recordsExcluded": 0,
         }
 
-        if records and any((record.prompt or "").strip() for record in records):
+        if not self.semantic_enabled:
+            skipped[SEMANTIC_DUPLICATE] = "semantic analysis is disabled"
+        elif records and any((record.prompt or "").strip() for record in records):
             semantic_findings, semantic_metadata, semantic_summary = self._semantic(records)
             findings.extend(semantic_findings)
             metadata["detectors"].append(SEMANTIC_DUPLICATE)

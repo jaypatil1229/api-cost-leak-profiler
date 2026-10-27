@@ -23,7 +23,8 @@ export class PricingController {
   @Get()
   @ApiOperation({
     summary: 'List model pricing entries',
-    description: 'Returns all pricing entries, optionally filtered by provider, model name, or verified status.',
+    description:
+      'Returns all pricing entries, optionally filtered by provider, model name, or verified status.',
   })
   @ApiOkEnvelope()
   @ApiStandardErrors()
@@ -54,7 +55,8 @@ export class PricingController {
   @Patch(':id')
   @ApiOperation({
     summary: 'Update pricing entry',
-    description: 'Updates mutable fields of a pricing entry (rates, source, notes, verified flag, effectiveTo).',
+    description:
+      'Updates mutable fields of a pricing entry (rates, source, notes, verified flag, effectiveTo).',
   })
   @ApiOkEnvelope()
   @ApiStandardErrors({ notFound: true })
@@ -68,7 +70,8 @@ export class PricingController {
   @Delete(':id')
   @ApiOperation({
     summary: 'Delete pricing entry',
-    description: 'Permanently removes a pricing entry. Usage records that referenced this pricing keep their computed costs.',
+    description:
+      'Permanently removes a pricing entry. Usage records that referenced this pricing keep their computed costs.',
   })
   @ApiOkEnvelope()
   @ApiStandardErrors({ notFound: true })
