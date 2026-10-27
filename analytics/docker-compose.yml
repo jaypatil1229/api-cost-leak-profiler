@@ -1,0 +1,23 @@
+services:
+  analytics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: development
+      ENABLE_SEMANTIC_ANALYSIS: "false"
+      ANALYTICS_SERVICE_KEY: ${ANALYTICS_SERVICE_KEY:?Set ANALYTICS_SERVICE_KEY in analytics/.env}
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import json, urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)); raise SystemExit(0 if d.get('anomalyDetector', {}).get('ready') else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
