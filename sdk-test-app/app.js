@@ -6,7 +6,8 @@ const scenarioHelp = {
   "retry-loop": "Makes five rapid calls with the same prompt, model, and session. This produces the repeated-call pattern the current detector identifies as a possible retry loop.",
   "unbounded-context": "Makes five chat calls while retaining an increasingly long transcript. Input token counts should rise across one session.",
   "oversized-prompt": "Expands the source material to roughly 260k characters (about 50k+ tokens). This can cost more and may exceed a model's context limit.",
-  "spend-spike": "Writes one small baseline event 90 minutes ago, then makes four larger calls now. Detection compares adjacent one-hour windows; make sure ACLP pricing exists for your chosen model."
+  "spend-spike": "Writes one small baseline event 90 minutes ago, then makes four larger calls now. Detection compares adjacent one-hour windows; make sure ACLP pricing exists for your chosen model.",
+  "anomaly-detection": "Generates a baseline of normal usage, then adds anomalous patterns (unusually large requests, extreme costs, outlier token counts). Requires Python analytics service for Isolation Forest detection."
 };
 scenario.addEventListener("change", () => { $("scenarioHelp").textContent = scenarioHelp[scenario.value]; });
 scenario.dispatchEvent(new Event("change"));
@@ -44,6 +45,7 @@ async function run(button, body) {
 $("runFeature").addEventListener("click", (event) => run(event.currentTarget, { feature: features.value, text: $("input").value, scenario: "normal" }));
 $("runScenario").addEventListener("click", (event) => run(event.currentTarget, { feature: features.value, text: $("input").value, scenario: scenario.value }));
 $("refresh").addEventListener("click", refresh);
+
 status(); refresh(); setInterval(refresh, 5000);
 
 // Chatbot functionality
