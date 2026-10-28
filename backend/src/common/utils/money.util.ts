@@ -46,9 +46,7 @@ export function sumDecimals(values: Array<Prisma.Decimal | null | undefined>): P
  * Computed entirely in Decimal — no intermediate float arithmetic.
  */
 export function costForTokens(tokens: number, ratePerMillionTokens: DecimalLike): Prisma.Decimal {
-  return toDecimal(ratePerMillionTokens)
-    .times(tokens)
-    .dividedBy(TOKENS_PER_PRICING_UNIT);
+  return toDecimal(ratePerMillionTokens).times(tokens).dividedBy(TOKENS_PER_PRICING_UNIT);
 }
 
 /**
@@ -57,10 +55,7 @@ export function costForTokens(tokens: number, ratePerMillionTokens: DecimalLike)
  * Returns `null` when the previous period is zero: "+∞%" or "+100%" would both
  * be misleading, so the API reports `null` and clients render "n/a".
  */
-export function percentageChange(
-  current: Prisma.Decimal,
-  previous: Prisma.Decimal,
-): number | null {
+export function percentageChange(current: Prisma.Decimal, previous: Prisma.Decimal): number | null {
   if (previous.isZero()) {
     return null;
   }

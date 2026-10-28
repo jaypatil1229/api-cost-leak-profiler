@@ -19,8 +19,6 @@ describe('safe test database guard', () => {
     );
 
     expect(result.status).toBe(1);
-    expect(`${result.stdout}${result.stderr}`).toContain(
-      'test database port must be 55432',
-    );
+    expect(`${result.stdout}${result.stderr}`).toContain('test database port must be 55432');
   });
 });

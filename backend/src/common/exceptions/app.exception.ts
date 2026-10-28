@@ -39,7 +39,10 @@ export class UnauthorizedAppException extends AppException {
 }
 
 export class ForbiddenAppException extends AppException {
-  constructor(message = 'You do not have access to this resource.', code: ErrorCodeValue = ErrorCode.FORBIDDEN) {
+  constructor(
+    message = 'You do not have access to this resource.',
+    code: ErrorCodeValue = ErrorCode.FORBIDDEN,
+  ) {
     super(HttpStatus.FORBIDDEN, { code, message });
   }
 }

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_version: str = "1.0.0"
     log_level: str = "INFO"
+    enable_semantic_analysis: bool = True
     embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     semantic_similarity_threshold: float = Field(default=0.80, ge=-1, le=1)
     max_semantic_records: int = Field(default=5000, ge=2)

@@ -1,14 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  AlertStatus,
-  FindingStatus,
-  Prisma,
-} from '@prisma/client';
+import { AlertStatus, FindingStatus, Prisma } from '@prisma/client';
 
-import {
-  ConflictAppException,
-  NotFoundAppException,
-} from '../../common/exceptions/app.exception';
+import { ConflictAppException, NotFoundAppException } from '../../common/exceptions/app.exception';
 import {
   type PaginatedResult,
   paginated,
@@ -93,7 +86,11 @@ export class ReportsService {
           LIMIT 10
         `),
         this.prisma.$queryRaw<
-          Array<{ feature_id: string | null; event_count: bigint; total_cost: Prisma.Decimal | null }>
+          Array<{
+            feature_id: string | null;
+            event_count: bigint;
+            total_cost: Prisma.Decimal | null;
+          }>
         >(Prisma.sql`
           SELECT "featureId" AS feature_id, COUNT(*)::bigint AS event_count, SUM("estimatedTotalCost") AS total_cost
           FROM "UsageRecord"
@@ -148,10 +145,7 @@ export class ReportsService {
     };
   }
 
-  async getCostReport(
-    organizationId: string,
-    query: ReportQueryDto,
-  ): Promise<CostReportDto> {
+  async getCostReport(organizationId: string, query: ReportQueryDto): Promise<CostReportDto> {
     const range = resolveTimeRange(query.from, query.to, {
       maxWindowDays: this.config.limits.maxQueryWindowDays,
     });
@@ -169,9 +163,7 @@ export class ReportsService {
         },
         _sum: { estimatedTotalCost: true },
       }),
-      this.prisma.$queryRaw<
-        Array<{ model: string; total_cost: Prisma.Decimal | null }>
-      >(Prisma.sql`
+      this.prisma.$queryRaw<Array<{ model: string; total_cost: Prisma.Decimal | null }>>(Prisma.sql`
         SELECT "model", SUM("estimatedTotalCost") AS total_cost
         FROM "UsageRecord"
         WHERE "organizationId" = ${organizationId}::uuid
@@ -234,10 +226,7 @@ export class ReportsService {
     };
   }
 
-  async getUsageReport(
-    organizationId: string,
-    query: ReportQueryDto,
-  ): Promise<UsageReportDto> {
+  async getUsageReport(organizationId: string, query: ReportQueryDto): Promise<UsageReportDto> {
     const range = resolveTimeRange(query.from, query.to, {
       maxWindowDays: this.config.limits.maxQueryWindowDays,
     });
@@ -343,8 +332,12 @@ export class ReportsService {
       activeAlerts,
     ] = await Promise.all([
       this.prisma.detectionFinding.count({ where: findingWhere }),
-      this.prisma.detectionFinding.count({ where: { ...findingWhere, status: FindingStatus.OPEN } }),
-      this.prisma.detectionFinding.count({ where: { ...findingWhere, status: FindingStatus.RESOLVED } }),
+      this.prisma.detectionFinding.count({
+        where: { ...findingWhere, status: FindingStatus.OPEN },
+      }),
+      this.prisma.detectionFinding.count({
+        where: { ...findingWhere, status: FindingStatus.RESOLVED },
+      }),
       this.prisma.detectionFinding.groupBy({
         by: ['severity'],
         where: findingWhere,
@@ -431,10 +424,7 @@ export class ReportsService {
     return paginated(items.map(mapSavedReportToDto), pagination, total);
   }
 
-  async getSavedReport(
-    organizationId: string,
-    reportId: string,
-  ): Promise<SavedReportResponseDto> {
+  async getSavedReport(organizationId: string, reportId: string): Promise<SavedReportResponseDto> {
     const report = await this.prisma.savedReport.findFirst({
       where: { id: reportId, organizationId },
     });
@@ -442,10 +432,7 @@ export class ReportsService {
     return mapSavedReportToDto(report);
   }
 
-  async deleteSavedReport(
-    organizationId: string,
-    reportId: string,
-  ): Promise<void> {
+  async deleteSavedReport(organizationId: string, reportId: string): Promise<void> {
     const report = await this.prisma.savedReport.findFirst({
       where: { id: reportId, organizationId },
     });

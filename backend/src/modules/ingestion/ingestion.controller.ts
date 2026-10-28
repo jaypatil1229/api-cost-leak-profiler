@@ -6,10 +6,7 @@ import { ApiKeyAuthenticated } from '../../common/decorators/public.decorator';
 import { RateLimitBucket } from '../../common/decorators/throttle.decorators';
 import { RequireApiKeyScopes } from '../../common/decorators/authorization.decorators';
 import { CurrentApiKey, Req } from '../../common/decorators/context.decorators';
-import {
-  ApiCreatedEnvelope,
-  ApiStandardErrors,
-} from '../../common/decorators/swagger.decorators';
+import { ApiCreatedEnvelope, ApiStandardErrors } from '../../common/decorators/swagger.decorators';
 import type { ApiKeyContext, RequestContext } from '../../common/types/request-context';
 import { ApiKeyScope } from '@prisma/client';
 
@@ -45,7 +42,8 @@ export class IngestionController {
     @CurrentApiKey() apiKeyContext: ApiKeyContext,
     @Req() req: RequestContext,
   ): Promise<IngestUsageResponseDto> {
-    const sdkName = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined;
+    const sdkName =
+      typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined;
 
     const result = await this.ingestionService.ingestSingle({
       projectId: apiKeyContext.projectId,
@@ -78,7 +76,8 @@ export class IngestionController {
     @CurrentApiKey() apiKeyContext: ApiKeyContext,
     @Req() req: RequestContext,
   ): Promise<IngestBatchResponseDto> {
-    const sdkName = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined;
+    const sdkName =
+      typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined;
 
     const result = await this.ingestionService.ingestBatch({
       projectId: apiKeyContext.projectId,

@@ -152,7 +152,7 @@ export function buildConfiguration(env: EnvironmentVariables): Configuration {
       url: env.ANALYTICS_SERVICE_URL,
       token: env.ANALYTICS_SERVICE_TOKEN,
       timeoutMs: env.ANALYTICS_SERVICE_TIMEOUT_MS,
-      enabled: Boolean(env.ANALYTICS_SERVICE_URL),
+      enabled: Boolean(env.ANALYTICS_SERVICE_URL && env.ANALYTICS_SERVICE_TOKEN),
     },
     docs: {
       // Swagger is opt-in in production; it is on by default elsewhere.

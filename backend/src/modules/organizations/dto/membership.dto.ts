@@ -111,8 +111,7 @@ export class InvitationCreatedResponseDto {
   invitation!: InvitationResponseDto;
 
   @ApiProperty({
-    description:
-      'Raw invitation token. Shown exactly once — only its SHA-256 hash is persisted.',
+    description: 'Raw invitation token. Shown exactly once — only its SHA-256 hash is persisted.',
   })
   token!: string;
 

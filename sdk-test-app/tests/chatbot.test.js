@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 // Mock environment variables for testing
 process.env.GEMINI_API_KEY = "test-api-key";
 process.env.GEMINI_MODEL = "gemini-3.8-flash";
-process.env.ACLP_INGEST_URL = "http://localhost:3000/api/v1/ingest/usage";
+process.env.ACLP_INGEST_URL = "http://localhost:4000/api/v1/ingest/usage";
 process.env.ACLP_API_KEY = "test-aclp-key";
 
 describe("Chatbot Session Management", () => {

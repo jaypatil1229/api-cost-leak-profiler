@@ -89,6 +89,7 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
 
   it('deduplicates concurrent inserts at the database and keeps separate recurrence identities', async () => {
     const fingerprint = randomUUID().replaceAll('-', '').padEnd(64, 'a');
+    const issueKey = `issue-${projectId}-${fingerprint}`;
     const data = {
       organizationId,
       projectId,
@@ -99,13 +100,14 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
       severity: Severity.MEDIUM,
       evidence: { scoreInterpretation: 'uncalibrated signal' },
       fingerprint,
+      issueKey,
       windowStart: new Date('2026-10-01T00:00:00.000Z'),
       windowEnd: new Date('2026-10-02T00:00:00.000Z'),
     };
 
     const insertResults = await Promise.all(
       Array.from({ length: 8 }, () =>
-        prisma.detectionFinding.createMany({ data, skipDuplicates: true }),
+        prisma.detectionFinding.createMany({ data, skipDuplicates: true } as any),
       ),
     );
     expect(insertResults.reduce((total, result) => total + result.count, 0)).toBe(1);
@@ -135,7 +137,7 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
               fingerprint,
             },
           },
-          create: data,
+          create: data as any,
           update: { evidence: { score: -0.2 } },
         }),
       ),
@@ -151,7 +153,7 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
         fingerprint: randomUUID().replaceAll('-', '').padEnd(64, 'b'),
         windowStart: data.windowEnd,
         windowEnd: new Date('2026-10-03T00:00:00.000Z'),
-      },
+      } as any,
     });
     expect(recurring.id).not.toBe(findingId);
     expect(await prisma.detectionFinding.count({ where: { projectId } })).toBe(2);
@@ -159,6 +161,7 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
 
   it('enforces one alert per finding during concurrent upserts and preserves alert status', async () => {
     if (!findingId) throw new Error('The preceding finding test did not create its fixture.');
+    const issueKey = `alert-issue-${findingId}`;
     await Promise.all(
       Array.from({ length: 8 }, () =>
         prisma.alert.upsert({
@@ -167,13 +170,14 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
             organizationId,
             projectId,
             findingId,
+            issueKey,
             category: AlertCategory.ANOMALY,
             severity: Severity.MEDIUM,
             title: 'Anomaly candidate',
             message: 'Review usage evidence.',
-          },
+          } as any,
           update: { message: 'Refreshed analysis evidence.' },
-        }),
+        } as any),
       ),
     );
     let alert = await prisma.alert.findUniqueOrThrow({ where: { findingId } });
@@ -190,12 +194,13 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
         organizationId,
         projectId,
         findingId,
+        issueKey,
         category: AlertCategory.ANOMALY,
         title: 'Anomaly candidate',
         message: 'Refreshed analysis evidence.',
-      },
+      } as any,
       update: { message: 'Refreshed analysis evidence.' },
-    });
+    } as any);
     expect(alert.status).toBe(AlertStatus.ACKNOWLEDGED);
     expect(alert.acknowledgedAt).toEqual(acknowledgedAt);
   });
@@ -207,6 +212,7 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
           organizationId,
           findingId: null,
           projectId: null,
+          issueKey: 'system-alert-one',
           category: AlertCategory.SYSTEM,
           title: 'Test system alert one',
           message: 'Test-only unlinked alert.',
@@ -215,11 +221,12 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
           organizationId,
           findingId: null,
           projectId: null,
+          issueKey: 'system-alert-two',
           category: AlertCategory.SYSTEM,
           title: 'Test system alert two',
           message: 'Test-only unlinked alert.',
         },
-      ],
+      ] as any,
     });
     expect(await prisma.alert.count({ where: { organizationId, findingId: null } })).toBe(2);
   });

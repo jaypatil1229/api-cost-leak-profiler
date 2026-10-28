@@ -176,9 +176,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
   }
 
-  private fromPrismaKnownError(
-    exception: Prisma.PrismaClientKnownRequestError,
-  ): NormalizedError {
+  private fromPrismaKnownError(exception: Prisma.PrismaClientKnownRequestError): NormalizedError {
     switch (exception.code) {
       case PrismaErrorCode.UNIQUE_CONSTRAINT: {
         const fields = uniqueConstraintFields(exception);

@@ -9,9 +9,9 @@ import type { Detector, DetectorResult, DetectorRunContext } from './detector.in
 export class UnboundedContextDetector implements Detector {
   readonly type = DetectorType.UNBOUNDED_CONTEXT;
   readonly kind = DetectorKind.DETERMINISTIC;
-  readonly version = '0.1.0-stub';
+  readonly version = '1.0.0';
   readonly description =
-    'Flags API calls where input token count grows without bound across a session, suggesting missing context-window management. SCAFFOLDED — not operational.';
+    'Flags API calls where input token count grows without bound across a session, suggesting missing context-window management.';
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -53,7 +53,12 @@ export class UnboundedContextDetector implements Detector {
           title: `Unbounded context growth in session ${sessionId.slice(0, 8)}…`,
           explanation: `Input tokens grew monotonically in ${Math.round(growthRatio * 100)}% of consecutive calls (${group.length} calls). Peak: ${peakTokens} tokens. May indicate missing context-window truncation.`,
           severity: peakTokens > 100_000 ? Severity.HIGH : Severity.MEDIUM,
-          evidence: { sessionId, callCount: group.length, growthRatio, peakInputTokens: peakTokens },
+          evidence: {
+            sessionId,
+            callCount: group.length,
+            growthRatio,
+            peakInputTokens: peakTokens,
+          },
           estimatedRecoverableCost: null,
           fingerprint: `unbounded-ctx:${context.projectId}:${sessionId}`,
           usageRecordIds: group.map((r) => ({ id: r.id })),

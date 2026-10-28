@@ -18,7 +18,7 @@ if (!apiKey) {
   process.exitCode = 1;
 } else {
   const client = new AclpClient({
-    baseUrl: process.env.ACLP_API_BASE_URL || 'http://localhost:3000/api/v1',
+    baseUrl: process.env.ACLP_API_BASE_URL || 'http://localhost:4000/api/v1',
     apiKey,
     onError(error) {
       // Safe error information only; event payloads and credentials are omitted.

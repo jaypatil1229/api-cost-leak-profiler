@@ -108,6 +108,25 @@ describe('AnalyticsClient', () => {
     ).rejects.toThrow('timed out');
   });
 
+  it('reports readiness only when the Isolation Forest detector is ready', async () => {
+    const fetchMock = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ anomalyDetector: { ready: true } }), { status: 200 }),
+      );
+    const client = new AnalyticsClient(config);
+    await expect(client.checkHealth()).resolves.toMatchObject({ status: 'up' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://analytics/health',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ anomalyDetector: { ready: false } }), { status: 200 }),
+    );
+    await expect(client.checkHealth()).resolves.toMatchObject({ status: 'down' });
+  });
+
   it('rejects a malformed analytics response instead of returning empty findings', async () => {
     jest
       .spyOn(global, 'fetch')

@@ -1,22 +1,32 @@
 from threading import Lock
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
+SentenceTransformer = None
 
 class EmbeddingService:
     """Thread-safe, lazy model wrapper reused across API requests."""
 
     def __init__(self, model_name: str):
         self.model_name = model_name
-        self._model: SentenceTransformer | None = None
+        self._model = None
         self._lock = Lock()
 
     def load_model(self) -> None:
         if self._model is None:
             with self._lock:
                 if self._model is None:
-                    self._model = SentenceTransformer(self.model_name)
+                    model_class = SentenceTransformer
+                    if model_class is None:
+                        try:
+                            from sentence_transformers import SentenceTransformer as model_class
+                        except ModuleNotFoundError as error:
+                            if error.name != "sentence_transformers":
+                                raise
+                            raise RuntimeError(
+                                "Semantic analysis requires the aclp-analytics[semantic] extra."
+                            ) from error
+                    self._model = model_class(self.model_name)
 
     def encode(self, prompts: list[str]) -> np.ndarray:
         if not prompts:

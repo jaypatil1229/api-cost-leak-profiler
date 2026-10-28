@@ -1,10 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
-import {
-  ConflictAppException,
-  NotFoundAppException,
-} from '../../common/exceptions/app.exception';
+import { ConflictAppException, NotFoundAppException } from '../../common/exceptions/app.exception';
 import { toMoneyString } from '../../common/utils/money.util';
 import { APP_CONFIG } from '../../config/config.module';
 import type { Configuration } from '../../config/configuration';
@@ -83,11 +80,14 @@ export class PricingService {
     if (dto.outputRatePerMillionTokens !== undefined)
       data.outputRatePerMillionTokens = new Prisma.Decimal(dto.outputRatePerMillionTokens);
     if (dto.cachedInputRatePerMillionTokens !== undefined)
-      data.cachedInputRatePerMillionTokens = new Prisma.Decimal(dto.cachedInputRatePerMillionTokens);
+      data.cachedInputRatePerMillionTokens = new Prisma.Decimal(
+        dto.cachedInputRatePerMillionTokens,
+      );
     if (dto.source !== undefined) data.source = dto.source;
     if (dto.notes !== undefined) data.notes = dto.notes;
     if (dto.isVerified !== undefined) data.isVerified = dto.isVerified;
-    if (dto.effectiveTo !== undefined) data.effectiveTo = dto.effectiveTo ? new Date(dto.effectiveTo) : null;
+    if (dto.effectiveTo !== undefined)
+      data.effectiveTo = dto.effectiveTo ? new Date(dto.effectiveTo) : null;
 
     const row = await this.prisma.modelPricing.update({ where: { id }, data });
     return mapPricingToDto(row);
@@ -112,7 +112,8 @@ function mapPricingToDto(row: any): ModelPricingResponseDto {
     source: row.source,
     notes: row.notes,
     isVerified: row.isVerified,
-    effectiveFrom: row.effectiveFrom instanceof Date ? row.effectiveFrom.toISOString() : row.effectiveFrom,
+    effectiveFrom:
+      row.effectiveFrom instanceof Date ? row.effectiveFrom.toISOString() : row.effectiveFrom,
     effectiveTo: row.effectiveTo instanceof Date ? row.effectiveTo.toISOString() : row.effectiveTo,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,

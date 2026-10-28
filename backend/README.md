@@ -180,6 +180,32 @@ npm run typecheck
 npm run build
 ~~~
 
+### Local analytics service (Isolation Forest)
+
+The backend has an optional authenticated adapter for the Python analytics service. For local anomaly analysis, use the loopback-only compose service in `analytics/`:
+
+1. Copy `analytics/.env.example` to `analytics/.env` and `backend/.env.example` to `backend/.env`.
+2. Generate a random shared key locally with `python -c "import secrets; print(secrets.token_hex(32))"`. Set that value as `ANALYTICS_SERVICE_KEY` in `analytics/.env` and `ANALYTICS_SERVICE_TOKEN` in `backend/.env`.
+3. Set `ANALYTICS_SERVICE_URL=http://127.0.0.1:8000` in `backend/.env`. Set the backend's other required local settings and point `DATABASE_URL` at an explicitly verified development database.
+4. Start analytics from the repository root:
+
+~~~powershell
+docker compose --env-file analytics/.env -f analytics/docker-compose.yml up -d --build
+Invoke-RestMethod http://127.0.0.1:8000/health
+~~~
+
+The analytics service binds to loopback and runs with semantic prompt analysis disabled; no prompt text is sent by the backend. Start NestJS from `backend/` after configuring its environment. `/api/v1/health/ready` reports actual analytics reachability and Isolation Forest readiness; analytics remains optional and does not make backend readiness fail.
+
+Run the `ANOMALY_ISOLATION_FOREST` detector through `POST /api/v1/organizations/{organizationId}/detection/runs`, specifying the project and UTC analysis window. Poll the returned run ID, then read persisted findings and linked alerts from the organization detection and alerts endpoints. Isolation Forest needs at least 10 usable records by default; smaller or unusable datasets complete without findings and include insufficient-data metadata. The backend currently sends at most 1000 records per analytics request.
+
+Stop the local analytics service when finished:
+
+~~~powershell
+docker compose --env-file analytics/.env -f analytics/docker-compose.yml down
+~~~
+
+Do not place the shared key in source control, frontend configuration, or browser requests.
+
 The API base is http://127.0.0.1:3000/api/v1. Liveness/readiness are /health/live and /health/ready under that base. Build runs prebuild and deletes backend/dist before rebuilding.
 
 Unit tests do not require PostgreSQL:
@@ -314,7 +340,7 @@ Most endpoints require a Bearer token:
 
 ```bash
 curl -H "Authorization: Bearer eyJhbGc..." \
-  http://localhost:3000/api/v1/auth/me
+  http://localhost:4000/api/v1/auth/me
 ```
 
 Access tokens expire in 15 minutes. Use the refresh endpoint to rotate tokens.
@@ -327,7 +353,7 @@ Ingestion endpoints use API key authentication:
 curl -H "X-API-Key: aclp_proj_abc123..." \
   -H "Content-Type: application/json" \
   -d '{"sdkEventId":"evt-1","provider":"OPENAI",...}' \
-  http://localhost:3000/api/v1/ingest/usage
+  http://localhost:4000/api/v1/ingest/usage
 ```
 
 API keys are project-scoped. Generate them via `POST /projects/:projectId/api-keys`.

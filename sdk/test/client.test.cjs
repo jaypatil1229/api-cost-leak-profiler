@@ -37,7 +37,7 @@ function response(events, statuses = {}) {
 
 function client(fetch, options = {}) {
   return new AclpClient({
-    baseUrl: 'http://localhost:3000/api/v1',
+    baseUrl: 'http://localhost:4000/api/v1',
     apiKey: key,
     fetch,
     flushIntervalMs: 0,

@@ -49,7 +49,7 @@ describe('string.util', () => {
     });
 
     it('should handle null/undefined', () => {
-      expect(isUuid(null as unknown as string)).toBe(false);
+      expect(isUuid(null)).toBe(false);
       expect(isUuid(undefined as unknown as string)).toBe(false);
     });
   });

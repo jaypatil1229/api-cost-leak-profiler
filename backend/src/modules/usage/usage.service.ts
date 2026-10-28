@@ -75,10 +75,7 @@ export class UsageService {
     return paginated(items.map(mapRecordToDto), pagination, total);
   }
 
-  async getRecord(
-    organizationId: string,
-    recordId: string,
-  ): Promise<UsageRecordResponseDto> {
+  async getRecord(organizationId: string, recordId: string): Promise<UsageRecordResponseDto> {
     const record = await this.prisma.usageRecord.findFirst({
       where: { id: recordId, organizationId },
     });
@@ -227,7 +224,8 @@ export class UsageService {
       eventCount: Number(r.event_count),
       totalTokens: Number(r.total_tokens),
       totalCost: toMoneyString(r.total_cost),
-      percentage: totalEvents > 0 ? Number(((Number(r.event_count) / totalEvents) * 100).toFixed(2)) : null,
+      percentage:
+        totalEvents > 0 ? Number(((Number(r.event_count) / totalEvents) * 100).toFixed(2)) : null,
     }));
   }
 
@@ -272,7 +270,8 @@ function mapRecordToDto(record: any): UsageRecordResponseDto {
     externalRequestId: record.externalRequestId,
     provider: record.provider,
     model: record.model,
-    occurredAt: record.occurredAt instanceof Date ? record.occurredAt.toISOString() : record.occurredAt,
+    occurredAt:
+      record.occurredAt instanceof Date ? record.occurredAt.toISOString() : record.occurredAt,
     inputTokens: record.inputTokens,
     outputTokens: record.outputTokens,
     totalTokens: record.totalTokens,

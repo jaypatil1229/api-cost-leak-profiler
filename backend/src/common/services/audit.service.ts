@@ -66,7 +66,7 @@ export class AuditService {
       action: input.action,
       resourceType: input.resourceType,
       resourceId: input.resourceId ?? null,
-      metadata: sanitized ? (sanitized as Prisma.InputJsonValue) : Prisma.JsonNull,
+      metadata: sanitized ? sanitized : Prisma.JsonNull,
       ipAddress: input.actor.ipAddress ?? null,
       userAgent: input.actor.userAgent?.slice(0, 512) ?? null,
       requestId: input.actor.requestId?.slice(0, 64) ?? null,

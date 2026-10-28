@@ -22,15 +22,7 @@ export enum NodeEnvironment {
   Production = 'production',
 }
 
-export const LOG_LEVELS = [
-  'fatal',
-  'error',
-  'warn',
-  'info',
-  'debug',
-  'trace',
-  'silent',
-] as const;
+export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
@@ -230,6 +222,7 @@ export class EnvironmentVariables {
   @Transform(trimOrUndefined)
   @IsOptional()
   @IsString()
+  @MinLength(32, { message: 'ANALYTICS_SERVICE_TOKEN must be at least 32 characters.' })
   ANALYTICS_SERVICE_TOKEN?: string;
 
   @Transform(toInt)
@@ -294,6 +287,12 @@ export function validateEnvironment(raw: Record<string, unknown>): EnvironmentVa
 
   if (config.NODE_ENV === NodeEnvironment.Production && config.CORS_ORIGINS.trim() === '*') {
     problems.push('  - CORS_ORIGINS must not be "*" in production.');
+  }
+
+  if (Boolean(config.ANALYTICS_SERVICE_URL) !== Boolean(config.ANALYTICS_SERVICE_TOKEN)) {
+    problems.push(
+      '  - ANALYTICS_SERVICE_URL and ANALYTICS_SERVICE_TOKEN must both be set to enable analytics.',
+    );
   }
 
   if (problems.length > 0) {

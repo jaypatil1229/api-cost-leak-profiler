@@ -95,7 +95,10 @@ export class OrganizationContextGuard implements CanActivate {
       );
     }
     if (!isUuid(candidate)) {
-      throw new BadRequestAppException('organizationId must be a UUID.', ErrorCode.VALIDATION_ERROR);
+      throw new BadRequestAppException(
+        'organizationId must be a UUID.',
+        ErrorCode.VALIDATION_ERROR,
+      );
     }
     return candidate;
   }

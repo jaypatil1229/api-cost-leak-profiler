@@ -1,24 +1,11 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  ParseUUIDPipe,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 
 import { CurrentOrganization, CurrentUser } from '../../common/decorators/context.decorators';
 import { RequireOrgMembership } from '../../common/decorators/authorization.decorators';
 import type { AuthenticatedUser, OrganizationContext } from '../../common/types/request-context';
 
 import { ReportsService } from './reports.service';
-import {
-  CreateSavedReportDto,
-  ReportQueryDto,
-  SavedReportQueryDto,
-} from './dto/reports.dto';
+import { CreateSavedReportDto, ReportQueryDto, SavedReportQueryDto } from './dto/reports.dto';
 
 @Controller('organizations/:organizationId/reports')
 @RequireOrgMembership()
@@ -34,18 +21,12 @@ export class ReportsController {
   }
 
   @Get('cost')
-  getCostReport(
-    @CurrentOrganization() org: OrganizationContext,
-    @Query() query: ReportQueryDto,
-  ) {
+  getCostReport(@CurrentOrganization() org: OrganizationContext, @Query() query: ReportQueryDto) {
     return this.reportsService.getCostReport(org.organizationId, query);
   }
 
   @Get('usage')
-  getUsageReport(
-    @CurrentOrganization() org: OrganizationContext,
-    @Query() query: ReportQueryDto,
-  ) {
+  getUsageReport(@CurrentOrganization() org: OrganizationContext, @Query() query: ReportQueryDto) {
     return this.reportsService.getUsageReport(org.organizationId, query);
   }
 

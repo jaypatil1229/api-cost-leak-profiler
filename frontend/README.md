@@ -4,7 +4,7 @@ Next.js dashboard and marketing site for the ACLP backend.
 
 ## Local development
 
-Use Node.js 22 or newer. Start PostgreSQL and the NestJS backend first, then configure backend CORS to allow `http://localhost:3001` (for example, `CORS_ORIGINS=http://localhost:3001`). The backend defaults to port 3000 and the frontend dev server uses port 3001.
+Use Node.js 22 or newer. Start PostgreSQL and the NestJS backend first, then configure backend CORS to allow `http://localhost:3001` (for example, `CORS_ORIGINS=http://localhost:3001`). The NestJS backend runs on port 4000 by default and the frontend dev server uses port 3001.
 
 ```powershell
 Copy-Item .env.example .env.local
@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-The frontend API base URL is `NEXT_PUBLIC_API_BASE_URL`, defaulting to `http://localhost:3000/api/v1`. Set it to the deployed NestJS API URL for another environment. This value is public configuration, never a credential.
+The frontend API base URL is `NEXT_PUBLIC_API_BASE_URL`, defaulting to `http://localhost:4000/api/v1`. Set it to the deployed NestJS API URL for another environment. This value is public configuration, never a credential.
 
 ## Checks
 

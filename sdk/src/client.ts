@@ -35,7 +35,7 @@ export class AclpClient {
     if (!Number.isInteger(maxQueueSize) || maxQueueSize < 1) {
       throw new Error("maxQueueSize must be a positive integer.");
     }
-    const baseUrl = cfg.baseUrl ?? "http://localhost:3000";
+    const baseUrl = cfg.baseUrl ?? "http://localhost:4000";
     try {
       const parsedUrl = new URL(baseUrl);
       if (!["http:", "https:"].includes(parsedUrl.protocol)) throw new Error();

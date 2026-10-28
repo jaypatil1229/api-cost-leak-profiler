@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Query } from '@nestjs/common';
 
 import { CurrentOrganization, CurrentUser } from '../../common/decorators/context.decorators';
 import { RequireOrgMembership } from '../../common/decorators/authorization.decorators';
@@ -21,10 +13,7 @@ export class AlertsController {
   constructor(private readonly alertsService: AlertsService) {}
 
   @Get()
-  listAlerts(
-    @CurrentOrganization() org: OrganizationContext,
-    @Query() query: AlertQueryDto,
-  ) {
+  listAlerts(@CurrentOrganization() org: OrganizationContext, @Query() query: AlertQueryDto) {
     return this.alertsService.listAlerts(org.organizationId, query);
   }
 
@@ -43,11 +32,6 @@ export class AlertsController {
     @Param('alertId', new ParseUUIDPipe()) alertId: string,
     @Body() dto: UpdateAlertStatusDto,
   ) {
-    return this.alertsService.updateAlertStatus(
-      org.organizationId,
-      alertId,
-      dto,
-      user.id,
-    );
+    return this.alertsService.updateAlertStatus(org.organizationId, alertId, dto, user.id);
   }
 }

@@ -1,10 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CallStatus, CostStatus, IngestionBatchStatus, Prisma, Provider } from '@prisma/client';
 
-import {
-  MAX_EVENT_AGE_MS,
-  MAX_EVENT_CLOCK_SKEW_MS,
-} from '../../common/constants/app.constants';
+import { MAX_EVENT_AGE_MS, MAX_EVENT_CLOCK_SKEW_MS } from '../../common/constants/app.constants';
 import { sanitizeMetadata } from '../../common/utils/metadata.util';
 import { calculateUsageCost } from '../../common/utils/usage-cost.util';
 import { APP_CONFIG } from '../../config/config.module';
@@ -178,7 +175,9 @@ export class IngestionService {
     }
 
     const occurredAt = new Date(event.occurredAt);
-    const sanitized = event.metadata ? sanitizeMetadata(event.metadata) : { metadata: null, warnings: [] };
+    const sanitized = event.metadata
+      ? sanitizeMetadata(event.metadata)
+      : { metadata: null, warnings: [] };
     warnings.push(...sanitized.warnings);
 
     const pricing = await this.findPricing(event.provider, event.model, occurredAt);
@@ -215,7 +214,9 @@ export class IngestionService {
           costStatus: cost.status,
           modelPricingId: pricing?.id ?? null,
           pricingVersion: pricing?.version ?? null,
-          metadata: sanitized.metadata ? (sanitized.metadata as Prisma.InputJsonValue) : Prisma.DbNull,
+          metadata: sanitized.metadata
+            ? (sanitized.metadata as Prisma.InputJsonValue)
+            : Prisma.DbNull,
           sdkName: input.sdkName ?? null,
           sdkVersion: input.sdkVersion ?? null,
           apiKeyId: input.apiKeyId,
@@ -230,7 +231,9 @@ export class IngestionService {
         warnings,
       };
     } catch (error) {
-      this.logger.error(`Failed to create usage record: ${error instanceof Error ? error.message : 'unknown'}`);
+      this.logger.error(
+        `Failed to create usage record: ${error instanceof Error ? error.message : 'unknown'}`,
+      );
       return {
         eventId: event.eventId,
         usageRecordId: null,

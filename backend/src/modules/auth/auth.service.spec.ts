@@ -57,9 +57,9 @@ describe('AuthService', () => {
             },
             refreshToken: {
               create: jest.fn(),
-            findUnique: jest.fn(),
-            update: jest.fn(),
-            updateMany: jest.fn(),
+              findUnique: jest.fn(),
+              update: jest.fn(),
+              updateMany: jest.fn(),
             },
             $transaction: jest.fn((operation) =>
               typeof operation === 'function' ? operation(prisma) : Promise.all(operation),
@@ -132,12 +132,14 @@ describe('AuthService', () => {
 
       const result = await service.register(input);
 
-      expect(result.user).toEqual(expect.objectContaining({
-        id: mockUser.id,
-        email: 'new@example.com',
-        name: input.name,
-        status: mockUser.status,
-      }));
+      expect(result.user).toEqual(
+        expect.objectContaining({
+          id: mockUser.id,
+          email: 'new@example.com',
+          name: input.name,
+          status: mockUser.status,
+        }),
+      );
       expect(result.accessToken).toBe('access-token');
       expect(result.refreshToken).toBe('refresh-token-raw');
       expect(passwordService.hash).toHaveBeenCalledWith(input.password);
@@ -163,11 +165,15 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(mockUser);
       passwordService.verify.mockResolvedValue(true);
       tokenService.issueRefreshToken.mockReturnValue({
-        raw: 'refresh-token-raw', hash: 'refresh-token-hash',
-        expiresAt: new Date(Date.now() + 604800000), expiresInSeconds: 604800,
+        raw: 'refresh-token-raw',
+        hash: 'refresh-token-hash',
+        expiresAt: new Date(Date.now() + 604800000),
+        expiresInSeconds: 604800,
       });
       tokenService.signAccessToken.mockResolvedValue({
-        token: 'access-token', tokenId: 'access-id', expiresInSeconds: 900,
+        token: 'access-token',
+        tokenId: 'access-id',
+        expiresInSeconds: 900,
       });
 
       const result = await service.login({
@@ -243,14 +249,22 @@ describe('AuthService', () => {
       };
 
       tokenService.hashRefreshToken.mockReturnValue('stored-hash');
-      (prisma.refreshToken.findUnique as jest.Mock).mockResolvedValue({ ...storedToken, familyId: 'family-1', replacedById: null });
+      (prisma.refreshToken.findUnique as jest.Mock).mockResolvedValue({
+        ...storedToken,
+        familyId: 'family-1',
+        replacedById: null,
+      });
       prisma.user.findUnique.mockResolvedValue(mockUser);
       tokenService.issueRefreshToken.mockReturnValue({
-        raw: 'new-refresh-token', hash: 'new-hash',
-        expiresAt: new Date(Date.now() + 604800000), expiresInSeconds: 604800,
+        raw: 'new-refresh-token',
+        hash: 'new-hash',
+        expiresAt: new Date(Date.now() + 604800000),
+        expiresInSeconds: 604800,
       });
       tokenService.signAccessToken.mockResolvedValue({
-        token: 'new-access-token', tokenId: 'new-access-id', expiresInSeconds: 900,
+        token: 'new-access-token',
+        tokenId: 'new-access-id',
+        expiresInSeconds: 900,
       });
 
       const result = await service.refresh({

@@ -184,7 +184,8 @@ export class ProjectsController {
   @RequireProjectRole(OrgRole.ADMIN)
   @ApiOperation({
     summary: 'Archive project',
-    description: 'Archives a project. SDK ingestion is disabled for archived projects. Requires ADMIN role or higher.',
+    description:
+      'Archives a project. SDK ingestion is disabled for archived projects. Requires ADMIN role or higher.',
   })
   @ApiOkEnvelope()
   @ApiStandardErrors({ notFound: true })

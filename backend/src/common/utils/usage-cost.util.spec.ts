@@ -11,8 +11,18 @@ const rates = {
 describe('calculateUsageCost', () => {
   it.each([
     ['ordinary input', { inputTokens: 100, outputTokens: 20 }, '0.0002', '0.0004'],
-    ['partial cache', { inputTokens: 100, cachedInputTokens: 40, outputTokens: 20 }, '0.00016', '0.00036'],
-    ['fully cached', { inputTokens: 100, cachedInputTokens: 100, outputTokens: 0 }, '0.0001', '0.0001'],
+    [
+      'partial cache',
+      { inputTokens: 100, cachedInputTokens: 40, outputTokens: 20 },
+      '0.00016',
+      '0.00036',
+    ],
+    [
+      'fully cached',
+      { inputTokens: 100, cachedInputTokens: 100, outputTokens: 0 },
+      '0.0001',
+      '0.0001',
+    ],
     ['zero usage', { inputTokens: 0, outputTokens: 0 }, '0', '0'],
   ])('%s', (_label, tokens, input, total) => {
     const result = calculateUsageCost(tokens, rates);
@@ -29,6 +39,8 @@ describe('calculateUsageCost', () => {
   });
 
   it('rejects cached tokens greater than input tokens', () => {
-    expect(() => calculateUsageCost({ inputTokens: 2, cachedInputTokens: 3, outputTokens: 0 }, rates)).toThrow(RangeError);
+    expect(() =>
+      calculateUsageCost({ inputTokens: 2, cachedInputTokens: 3, outputTokens: 0 }, rates),
+    ).toThrow(RangeError);
   });
 });

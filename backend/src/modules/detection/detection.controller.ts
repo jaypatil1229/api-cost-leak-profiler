@@ -44,10 +44,7 @@ export class DetectionController {
   }
 
   @Get('runs')
-  listRuns(
-    @CurrentOrganization() org: OrganizationContext,
-    @Query() query: DetectionRunQueryDto,
-  ) {
+  listRuns(@CurrentOrganization() org: OrganizationContext, @Query() query: DetectionRunQueryDto) {
     return this.detectionService.listRuns(org.organizationId, query);
   }
 
@@ -60,10 +57,7 @@ export class DetectionController {
   }
 
   @Get('findings')
-  listFindings(
-    @CurrentOrganization() org: OrganizationContext,
-    @Query() query: FindingQueryDto,
-  ) {
+  listFindings(@CurrentOrganization() org: OrganizationContext, @Query() query: FindingQueryDto) {
     return this.detectionService.listFindings(org.organizationId, query);
   }
 
@@ -82,11 +76,6 @@ export class DetectionController {
     @Param('findingId', new ParseUUIDPipe()) findingId: string,
     @Body() dto: UpdateFindingStatusDto,
   ) {
-    return this.detectionService.updateFindingStatus(
-      org.organizationId,
-      findingId,
-      dto,
-      user.id,
-    );
+    return this.detectionService.updateFindingStatus(org.organizationId, findingId, dto, user.id);
   }
 }

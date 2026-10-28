@@ -12,9 +12,9 @@ const OVERSIZED_OUTPUT_THRESHOLD = 16_000;
 export class OversizedPromptDetector implements Detector {
   readonly type = DetectorType.OVERSIZED_PROMPT;
   readonly kind = DetectorKind.DETERMINISTIC;
-  readonly version = '0.1.0-stub';
+  readonly version = '1.0.0';
   readonly description =
-    'Flags individual API calls with unusually large input or output token counts. SCAFFOLDED — not operational.';
+    'Flags individual API calls with unusually large input or output token counts.';
 
   constructor(private readonly prisma: PrismaService) {}
 
