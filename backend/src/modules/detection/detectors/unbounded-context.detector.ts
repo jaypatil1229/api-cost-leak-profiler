@@ -9,9 +9,9 @@ import type { Detector, DetectorResult, DetectorRunContext } from './detector.in
 export class UnboundedContextDetector implements Detector {
   readonly type = DetectorType.UNBOUNDED_CONTEXT;
   readonly kind = DetectorKind.DETERMINISTIC;
-  readonly version = '0.1.0-stub';
+  readonly version = '1.0.0';
   readonly description =
-    'Flags API calls where input token count grows without bound across a session, suggesting missing context-window management. SCAFFOLDED — not operational.';
+    'Flags API calls where input token count grows without bound across a session, suggesting missing context-window management.';
 
   constructor(private readonly prisma: PrismaService) {}
 

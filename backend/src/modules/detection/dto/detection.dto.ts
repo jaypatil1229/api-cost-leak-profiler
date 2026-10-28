@@ -169,6 +169,9 @@ export class FindingResponseDto {
   @ApiProperty()
   fingerprint!: string;
 
+  @ApiPropertyOptional()
+  issueKey!: string;
+
   @ApiProperty({ format: 'date-time' })
   windowStart!: string;
 

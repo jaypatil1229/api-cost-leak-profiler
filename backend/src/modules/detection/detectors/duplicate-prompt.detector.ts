@@ -9,9 +9,9 @@ import type { Detector, DetectorResult, DetectorRunContext } from './detector.in
 export class DuplicatePromptDetector implements Detector {
   readonly type = DetectorType.DUPLICATE_PROMPT;
   readonly kind = DetectorKind.DETERMINISTIC;
-  readonly version = '0.1.0-stub';
+  readonly version = '1.0.0';
   readonly description =
-    'Identifies repeated identical prompts within a time window based on prompt hash matching. SCAFFOLDED — not operational.';
+    'Identifies repeated identical prompts within a time window based on prompt hash matching.';
 
   constructor(private readonly prisma: PrismaService) {}
 

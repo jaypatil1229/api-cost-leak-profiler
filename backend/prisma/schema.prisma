@@ -695,6 +695,12 @@ model DetectionFinding {
   /// Stable dedupe key produced by the detector (e.g. hash of prompt + window).
   fingerprint String @db.VarChar(128)
 
+  /// Stable key for alert deduplication across findings.
+  /// Derived from detector-specific stable identifiers to ensure
+  /// the same underlying issue creates the same alert across detection runs.
+  /// If not provided, falls back to fingerprint.
+  issueKey String? @db.VarChar(128)
+
   windowStart DateTime?
   windowEnd   DateTime?
 
@@ -766,6 +772,10 @@ model Alert {
   estimatedRecoverableCost Decimal? @db.Decimal(20, 10)
   currency                 String   @default("USD") @db.VarChar(3)
 
+  /// Stable dedupe key for alert-level deduplication across findings.
+  /// If null, falls back to using project+category combination for uniqueness.
+  issueKey String? @db.VarChar(128)
+
   acknowledgedAt       DateTime?
   acknowledgedByUserId String?   @db.Uuid
   acknowledgedBy       User?     @relation("AlertAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
@@ -778,6 +788,10 @@ model Alert {
   updatedAt DateTime @updatedAt
 
   @@unique([findingId])
+  // Note: issueKey is nullable. In PostgreSQL, NULL values are not equal to each other,
+  // so multiple alerts with issueKey=NULL and same project/category would be allowed.
+  // To enforce uniqueness at application level when issueKey is not provided.
+  @@index([projectId, category, issueKey])
   @@index([organizationId, status, createdAt])
   @@index([organizationId, severity, status])
   @@index([projectId, status, createdAt])

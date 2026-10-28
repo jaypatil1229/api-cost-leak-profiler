@@ -1,4 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { DetectorType } from '@prisma/client';
+import { PrismaService } from '../../database/prisma.service';
+import { DetectionService } from '../detection/detection.service';
 
 /**
  * Automatic detection runner for scheduled analysis.
@@ -12,6 +15,9 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
  * - AUTOMATED_DETECTION_INTERVAL_MS=300000 - Interval in milliseconds (default: 5 minutes)
  * - AUTOMATED_DETECTION_LOOKBACK_MS=600000 - Lookback window in milliseconds (default: 10 minutes)
  * - AUTOMATED_DETECTION_DETECTORS=all - Which detectors to run: all|deterministic|analytics
+ *
+ * Note: Analytics detectors (ISOLATION_FOREST) will fail gracefully if the Python
+ * analytics service is not configured or unavailable.
  */
 
 @Injectable()
@@ -28,16 +34,19 @@ export class AutomaticDetectionService implements OnModuleInit, OnModuleDestroy 
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
-  private readonly detectors = {
-    deterministic: [
-      'DUPLICATE_PROMPT',
-      'RETRY_LOOP',
-      'UNBOUNDED_CONTEXT',
-      'OVERSIZED_PROMPT',
-      'SPEND_SPIKE',
-    ],
-    analytics: ['ISOLATION_FOREST'],
-  };
+  private readonly detectors: DetectorType[] = [
+    DetectorType.DUPLICATE_PROMPT,
+    DetectorType.RETRY_LOOP,
+    DetectorType.UNBOUNDED_CONTEXT,
+    DetectorType.OVERSIZED_PROMPT,
+    DetectorType.SPEND_SPIKE,
+    DetectorType.ANOMALY_ISOLATION_FOREST,
+  ];
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly detectionService: DetectionService,
+  ) {}
 
   onModuleInit(): void {
     if (!this.enabled) {
@@ -50,11 +59,11 @@ export class AutomaticDetectionService implements OnModuleInit, OnModuleDestroy 
     );
 
     // Run immediately on startup
-    this.scheduleNextRun();
+    this.triggerDetectionRuns();
 
     // Then schedule recurring runs
     this.intervalId = setInterval(() => {
-      this.scheduleNextRun();
+      this.triggerDetectionRuns();
     }, this.intervalMs);
   }
 
@@ -69,47 +78,82 @@ export class AutomaticDetectionService implements OnModuleInit, OnModuleDestroy 
     return process.env[key] || defaultValue;
   }
 
-  private getDetectorsToRun(): string[] {
+  private getDetectorsToRun(): DetectorType[] {
     switch (this.detectorsConfig.toLowerCase()) {
       case 'deterministic':
-        return this.detectors.deterministic;
+        return this.detectors.filter(
+          (d) =>
+            d === DetectorType.DUPLICATE_PROMPT ||
+            d === DetectorType.RETRY_LOOP ||
+            d === DetectorType.UNBOUNDED_CONTEXT ||
+            d === DetectorType.OVERSIZED_PROMPT ||
+            d === DetectorType.SPEND_SPIKE,
+        );
       case 'analytics':
-        return this.detectors.analytics;
+        return this.detectors.filter((d) => d === DetectorType.ANOMALY_ISOLATION_FOREST);
       case 'all':
       default:
-        return [...this.detectors.deterministic, ...this.detectors.analytics];
+        return this.detectors;
     }
   }
 
-  private scheduleNextRun(): void {
+  private async triggerDetectionRuns(): Promise<void> {
+    const detectors = this.getDetectorsToRun();
+    if (detectors.length === 0) {
+      this.logger.warn('No detectors configured to run');
+      return;
+    }
+
+    const now = new Date();
+    const windowEnd = now;
+    const windowStart = new Date(now.getTime() - this.lookbackMs);
+
+    this.logger.debug(
+      `Scheduled detection run: ${windowStart.toISOString()} to ${windowEnd.toISOString()}`,
+    );
+
     try {
-      const now = new Date();
-      const windowEnd = now;
-      const windowStart = new Date(now.getTime() - this.lookbackMs);
+      // Get all active projects with their organizations
+      const projects = await this.prisma.project.findMany({
+        where: { status: 'ACTIVE' },
+        select: { id: true, organizationId: true },
+        orderBy: { createdAt: 'desc' },
+        take: 100, // Limit to prevent runaway processing
+      });
 
-      this.logger.debug(
-        `Scheduled detection run: ${windowStart.toISOString()} to ${windowEnd.toISOString()}`,
+      if (projects.length === 0) {
+        this.logger.debug('No active projects found for automatic detection');
+        return;
+      }
+
+      const detectorNames = detectors.map((d) => d.valueOf());
+      this.logger.log(
+        `Automated detection run triggered for ${projects.length} projects, detectors: ${detectorNames.join(', ')}`,
       );
 
-      // This would normally call DetectionService
-      const detectors = this.getDetectorsToRun();
-      this.logger.log(`Automated detection run triggered for detectors: ${detectors.join(', ')}`);
-
-      // TODO: Integrate with DetectionService
-      // This is a placeholder - you would inject DetectionService and call:
-      // for (const detectorType of detectors) {
-      //   await this.detectionService.triggerRun(organizationId, {
-      //     detectorType,
-      //     projectId: activeProjectId,
-      //     windowStart,
-      //     windowEnd
-      //   }, 'system');
-      // }
+      // Run each detector for each project
+      for (const project of projects) {
+        for (const detectorType of detectors) {
+          try {
+            await this.detectionService.triggerRun(project.organizationId, {
+              detectorType,
+              projectId: project.id,
+              windowStart,
+              windowEnd,
+            }, null);
+          } catch (detectorError) {
+            // Log error but continue with other detectors/projects
+            const errorMsg =
+              detectorError instanceof Error ? detectorError.message : String(detectorError);
+            this.logger.warn(
+              `Detection run failed for project=${project.id}, detector=${detectorType}: ${errorMsg}`,
+            );
+          }
+        }
+      }
     } catch (error) {
-      this.logger.error(
-        'Failed to schedule detection run',
-        error instanceof Error ? error.stack : String(error),
-      );
+      const errorMsg = error instanceof Error ? error.stack : String(error);
+      this.logger.error('Failed to schedule detection run', errorMsg);
     }
   }
 
@@ -121,7 +165,7 @@ export class AutomaticDetectionService implements OnModuleInit, OnModuleDestroy 
     intervalMs: number;
     lookbackMs: number;
     detectorsConfig: string;
-    detectorsToRun: string[];
+    detectorsToRun: DetectorType[];
   } {
     return {
       enabled: this.enabled,

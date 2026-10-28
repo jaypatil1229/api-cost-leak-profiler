@@ -41,7 +41,7 @@ export class DetectionService {
   async triggerRun(
     organizationId: string,
     dto: TriggerDetectionRunDto,
-    triggeredByUserId: string,
+    triggeredByUserId: string | null,
   ): Promise<DetectionRunResponseDto> {
     if (!this.registry.has(dto.detectorType)) {
       throw new BadRequestAppException(`Detector type "${dto.detectorType}" is not registered.`);
@@ -98,6 +98,9 @@ export class DetectionService {
       const persisted = await this.prisma.$transaction(async (tx) => {
         const persistedFindings = result.findings.map((finding) => {
           const usageRecordIds = [...new Set(finding.usageRecordIds.map((ref) => ref.id))].sort();
+          // Detector provides stable fingerprint that doesn't include window
+          // CreateFindingFingerprint adds window for internal tracking
+          const issueKey = finding.issueKey ?? finding.fingerprint;
           const fingerprint = createFindingFingerprint({
             organizationId,
             projectId: dto.projectId,
@@ -107,7 +110,7 @@ export class DetectionService {
             windowEnd: dto.windowEnd,
             usageRecordIds,
           });
-          return { finding, fingerprint, usageRecordIds };
+          return { finding, fingerprint, usageRecordIds, issueKey };
         });
 
         const evidenceIds = [...new Set(persistedFindings.flatMap((item) => item.usageRecordIds))];
@@ -123,7 +126,7 @@ export class DetectionService {
 
         const inserted = persistedFindings.length
           ? await tx.detectionFinding.createMany({
-              data: persistedFindings.map(({ finding, fingerprint }) => ({
+              data: persistedFindings.map(({ finding, fingerprint, issueKey }) => ({
                 organizationId,
                 detectionRunId: runId,
                 detectorType: dto.detectorType,
@@ -137,6 +140,7 @@ export class DetectionService {
                   ? new Prisma.Decimal(finding.estimatedRecoverableCost)
                   : null,
                 fingerprint,
+                issueKey,
                 windowStart: dto.windowStart,
                 windowEnd: dto.windowEnd,
                 status: FindingStatus.OPEN,
@@ -153,9 +157,10 @@ export class DetectionService {
           severity: (typeof result.findings)[number]['severity'];
           evidence: unknown;
           estimatedRecoverableCost: Prisma.Decimal | null;
+          issueKey: string;
         }> = [];
 
-        for (const { finding, fingerprint, usageRecordIds } of persistedFindings) {
+        for (const { finding, fingerprint, usageRecordIds, issueKey } of persistedFindings) {
           const where = {
             projectId_detectorType_fingerprint: {
               projectId: dto.projectId,
@@ -179,6 +184,7 @@ export class DetectionService {
                 ? new Prisma.Decimal(finding.estimatedRecoverableCost)
                 : null,
               fingerprint,
+              issueKey,
               windowStart: dto.windowStart,
               windowEnd: dto.windowEnd,
               status: FindingStatus.OPEN,
@@ -208,6 +214,7 @@ export class DetectionService {
             estimatedRecoverableCost: finding.estimatedRecoverableCost
               ? new Prisma.Decimal(finding.estimatedRecoverableCost)
               : null,
+            issueKey,
           });
 
           await tx.findingUsageLink.deleteMany({ where: { findingId: created.id } });
@@ -456,6 +463,7 @@ function mapFindingToDto(finding: any): FindingResponseDto {
     evidence: finding.evidence ?? null,
     estimatedRecoverableCost: toMoneyString(finding.estimatedRecoverableCost),
     fingerprint: finding.fingerprint,
+    issueKey: finding.issueKey,
     windowStart:
       finding.windowStart instanceof Date
         ? finding.windowStart.toISOString()

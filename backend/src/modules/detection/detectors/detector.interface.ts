@@ -7,6 +7,12 @@ export interface DetectorFinding {
   evidence: Record<string, unknown>;
   estimatedRecoverableCost: string | null;
   fingerprint: string;
+  /**
+   * Stable key for alert deduplication across detection runs.
+   * Should be consistent for the same underlying issue regardless of window.
+   * If not provided, falls back to fingerprint.
+   */
+  issueKey?: string;
   usageRecordIds: Array<{ id: string; role?: string }>;
 }
 

@@ -6,6 +6,7 @@ import { DetectionService } from './detection.service';
 import { AnalyticsClient } from './analytics.client';
 import { AlertsService } from './alerts.service';
 import { DetectionScheduler } from './detection.scheduler';
+import { AutomaticDetectionService } from './automatic-detection.service';
 import {
   DetectorRegistry,
   DuplicatePromptDetector,
@@ -29,7 +30,15 @@ const DETECTORS = [
 
 @Module({
   controllers: [DetectionController, AlertsController],
-  providers: [DetectionService, AlertsService, DetectorRegistry, AnalyticsClient, DetectionScheduler, ...DETECTORS],
+  providers: [
+    DetectionService,
+    AlertsService,
+    DetectorRegistry,
+    AnalyticsClient,
+    DetectionScheduler,
+    AutomaticDetectionService,
+    ...DETECTORS,
+  ],
   exports: [DetectionService, AlertsService, DetectorRegistry, AnalyticsClient],
 })
 export class DetectionModule implements OnModuleInit {

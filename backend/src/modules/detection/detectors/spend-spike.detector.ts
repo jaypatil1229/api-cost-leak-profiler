@@ -8,66 +8,117 @@ import { toMoneyString } from '../../../common/utils/money.util';
 import type { Detector, DetectorResult, DetectorRunContext } from './detector.interface';
 
 const SPIKE_THRESHOLD_MULTIPLIER = 3;
+const MIN_ABSOLUTE_INCREASE_USD = 0.10; // Minimum $0.10 increase to qualify as spike
 
 @Injectable()
 export class SpendSpikeDetector implements Detector {
   readonly type = DetectorType.SPEND_SPIKE;
   readonly kind = DetectorKind.DETERMINISTIC;
-  readonly version = '0.1.0-stub';
+  readonly version = '1.0.0';
   readonly description =
-    'Compares current window cost against the previous equal-length window and flags when spend exceeds a multiplier threshold. SCAFFOLDED — not operational.';
+    'Compares current window cost against the previous equal-length window and flags when spend exceeds a multiplier threshold.';
 
   constructor(private readonly prisma: PrismaService) {}
 
   async run(context: DetectorRunContext): Promise<DetectorResult> {
     const windowMs = context.windowEnd.getTime() - context.windowStart.getTime();
     const previousStart = new Date(context.windowStart.getTime() - windowMs);
+    const twoWindowsAgoStart = new Date(context.windowStart.getTime() - 2 * windowMs);
 
-    const [currentAgg, previousAgg] = await Promise.all([
+    // Fetch costs for three windows to handle edge cases where baseline might be in different window
+    const [currentAgg, previousAgg, twoWindowsAgoAgg] = await Promise.all([
       this.prisma.usageRecord.aggregate({
         where: {
           organizationId: context.organizationId,
           projectId: context.projectId,
           occurredAt: { gte: context.windowStart, lt: context.windowEnd },
+          estimatedTotalCost: { not: null }, // Only include records with calculated costs
         },
         _sum: { estimatedTotalCost: true },
-        _count: true,
+        _count: { estimatedTotalCost: true },
       }),
       this.prisma.usageRecord.aggregate({
         where: {
           organizationId: context.organizationId,
           projectId: context.projectId,
           occurredAt: { gte: previousStart, lt: context.windowStart },
+          estimatedTotalCost: { not: null },
         },
         _sum: { estimatedTotalCost: true },
-        _count: true,
+        _count: { estimatedTotalCost: true },
+      }),
+      this.prisma.usageRecord.aggregate({
+        where: {
+          organizationId: context.organizationId,
+          projectId: context.projectId,
+          occurredAt: { gte: twoWindowsAgoStart, lt: previousStart },
+          estimatedTotalCost: { not: null },
+        },
+        _sum: { estimatedTotalCost: true },
+        _count: { estimatedTotalCost: true },
       }),
     ]);
 
     const currentCost = currentAgg._sum.estimatedTotalCost ?? new Prisma.Decimal(0);
     const previousCost = previousAgg._sum.estimatedTotalCost ?? new Prisma.Decimal(0);
+    const twoWindowsAgoCost = twoWindowsAgoAgg._sum.estimatedTotalCost ?? new Prisma.Decimal(0);
+
+    const currentCount = currentAgg._count.estimatedTotalCost ?? 0;
+    const previousCount = previousAgg._count.estimatedTotalCost ?? 0;
+    const twoWindowsAgoCount = twoWindowsAgoAgg._count.estimatedTotalCost ?? 0;
+
     const findings: DetectorResult['findings'] = [];
 
-    if (
-      !previousCost.isZero() &&
-      currentCost.dividedBy(previousCost).greaterThan(SPIKE_THRESHOLD_MULTIPLIER)
-    ) {
-      const excess = currentCost.minus(previousCost);
-      findings.push({
-        title: `Spend spike: ${SPIKE_THRESHOLD_MULTIPLIER}x+ increase over previous window`,
-        explanation: `Current window cost ($${toMoneyString(currentCost) ?? '0'}) exceeds previous window ($${toMoneyString(previousCost) ?? '0'}) by more than ${SPIKE_THRESHOLD_MULTIPLIER}x.`,
-        severity: Severity.HIGH,
-        evidence: {
-          currentCost: toMoneyString(currentCost),
-          previousCost: toMoneyString(previousCost),
-          multiplier: currentCost.dividedBy(previousCost).toDecimalPlaces(2).toNumber(),
-        },
-        estimatedRecoverableCost: toMoneyString(excess),
-        fingerprint: `spend-spike:${context.projectId}:${context.windowStart.toISOString()}`,
-        usageRecordIds: [],
-      });
+    // Use the most recent non-zero previous cost as baseline
+    let baselineCost = previousCost;
+    let baselineWindow = 'immediate-previous';
+    if (baselineCost.isZero() && !twoWindowsAgoCost.isZero()) {
+      baselineCost = twoWindowsAgoCost;
+      baselineWindow = 'two-windows-ago';
     }
 
-    return { recordsScanned: currentAgg._count + previousAgg._count, findings };
+    const recordsScanned = currentCount + previousCount + twoWindowsAgoCount;
+
+    // Check for valid comparison and spike conditions
+    if (!baselineCost.isZero()) {
+      const ratio = currentCost.dividedBy(baselineCost);
+      const excess = currentCost.minus(baselineCost);
+      const minimumIncrease = new Prisma.Decimal(MIN_ABSOLUTE_INCREASE_USD);
+
+      if (ratio.greaterThan(SPIKE_THRESHOLD_MULTIPLIER) && excess.greaterThan(minimumIncrease)) {
+        const multiplier = ratio.toDecimalPlaces(2).toNumber();
+
+        // Create stable fingerprint based on project and spike magnitude
+        // This ensures the same underlying spike gets deduplicated across detection windows
+        const excessCents = parseFloat(toMoneyString(excess) ?? '0') * 100;
+        const fingerprint = `spend-spike:${context.projectId}:${Math.round(excessCents)}`;
+
+        findings.push({
+          title: `Spend spike: ${SPIKE_THRESHOLD_MULTIPLIER}x+ increase over previous window`,
+          explanation: `Current window cost ($${toMoneyString(currentCost) ?? '0'}) exceeds baseline ($$${toMoneyString(baselineCost) ?? '0'} from ${baselineWindow} window) by more than ${SPIKE_THRESHOLD_MULTIPLIER}x (excess: $${toMoneyString(excess) ?? '0'}).`,
+          severity: Severity.HIGH,
+          evidence: {
+            currentCost: toMoneyString(currentCost),
+            baselineCost: toMoneyString(baselineCost),
+            baselineWindow,
+            multiplier,
+            excess: toMoneyString(excess),
+            windowCounts: {
+              current: currentCount,
+              baseline:
+                baselineWindow === 'immediate-previous'
+                  ? previousCount
+                  : twoWindowsAgoCount,
+            },
+          },
+          estimatedRecoverableCost: toMoneyString(excess),
+          fingerprint,
+          issueKey: fingerprint, // Use same stable key for alert deduplication
+          usageRecordIds: [],
+        });
+      }
+    }
+
+    return { recordsScanned, findings };
   }
 }

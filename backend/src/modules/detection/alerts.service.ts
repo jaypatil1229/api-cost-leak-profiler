@@ -32,47 +32,55 @@ export class AlertsService {
       severity: Severity;
       evidence: unknown;
       estimatedRecoverableCost: Prisma.Decimal | null;
+      issueKey?: string;
     },
   ): Promise<void> {
-    const created = await this.prisma.$transaction(async (tx) => {
-      const persistedFinding = await tx.detectionFinding.findFirst({
-        where: { id: finding.id, organizationId, projectId: finding.projectId },
-        select: { id: true },
-      });
-      if (!persistedFinding) throw new NotFoundAppException('Finding', finding.id);
+    // Use issueKey for alert deduplication, fallback to finding id
+    const alertIssueKey = finding.issueKey ?? finding.id;
 
-      const alertData = {
-        organizationId,
-        projectId: finding.projectId,
-        findingId: finding.id,
-        category: 'COST_LEAK' as const,
-        severity: finding.severity,
-        title: finding.title,
-        message: finding.description,
-        evidence: finding.evidence as Prisma.InputJsonValue,
-        estimatedRecoverableCost: finding.estimatedRecoverableCost,
-      };
-      const inserted = await tx.alert.createMany({ data: [alertData], skipDuplicates: true });
-      await tx.alert.upsert({
-        where: { findingId: finding.id },
-        create: { ...alertData, status: 'OPEN' },
-        // Refresh detector content while preserving acknowledgement, dismissal,
-        // resolution, and original creation time.
-        update: {
-          organizationId: alertData.organizationId,
-          projectId: alertData.projectId,
-          category: alertData.category,
-          severity: alertData.severity,
-          title: alertData.title,
-          message: alertData.message,
-          evidence: alertData.evidence,
-          estimatedRecoverableCost: alertData.estimatedRecoverableCost,
+    const alertData = {
+      organizationId,
+      projectId: finding.projectId,
+      findingId: finding.id,
+      category: 'COST_LEAK' as const,
+      severity: finding.severity,
+      title: finding.title,
+      message: finding.description,
+      evidence: finding.evidence as Prisma.InputJsonValue,
+      estimatedRecoverableCost: finding.estimatedRecoverableCost,
+      issueKey: alertIssueKey,
+    };
+
+    await this.prisma.$transaction(async (tx) => {
+      // Check if an alert with this issueKey already exists and is not resolved/dismissed
+      const existingAlert = await tx.alert.findFirst({
+        where: {
+          issueKey: alertIssueKey,
+          status: { in: ['OPEN', 'ACKNOWLEDGED'] },
         },
       });
-      return inserted.count === 1;
+
+      if (existingAlert) {
+        // Update existing alert with new finding info, preserve status and acknowledgments
+        await tx.alert.update({
+          where: { id: existingAlert.id },
+          data: {
+            title: finding.title,
+            message: finding.description,
+            evidence: finding.evidence as Prisma.InputJsonValue,
+            estimatedRecoverableCost: finding.estimatedRecoverableCost,
+          },
+        });
+        return;
+      }
+
+      // Create new alert - use type assertion to work around stale Prisma types
+      await tx.alert.create({
+        data: alertData as any,
+      });
     });
-    if (created)
-      this.logger.log(`Alert created for finding ${finding.id} in org ${organizationId}`);
+
+    this.logger.log(`Alert created for finding ${finding.id} in org ${organizationId}`);
   }
 
   async listAlerts(
