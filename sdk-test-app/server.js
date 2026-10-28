@@ -53,8 +53,34 @@ async function body(req) {
   return JSON.parse(raw || "{}");
 }
 
-async function doCall(featureId, prompt, sessionId, options) {
-  return sdk.complete({ featureId, prompt, sessionId, maxTokens: options?.maxTokens ?? 350, status: options?.status ?? "SUCCESS" });
+async function doCall(featureId, prompt, sessionId, options = {}) {
+  const started = Date.now();
+  try {
+    const result = await sdk.complete({
+      featureId,
+      prompt,
+      sessionId,
+      maxTokens: options.maxTokens ?? 350,
+      status: options.status ?? "SUCCESS",
+      occurredAt: options.occurredAt,
+      deferEmit: options.deferEmit ?? false
+    });
+    return result;
+  } catch (error) {
+    // Record error event
+    const event = sdk.makeEvent({
+      featureId,
+      prompt,
+      sessionId,
+      status: options.status ?? "SUCCESS",
+      latencyMs: Date.now() - started,
+      inputTokens: options.inputTokens,
+      outputTokens: options.outputTokens,
+      totalTokens: options.totalTokens
+    });
+    sdk.emit(event);
+    throw error;
+  }
 }
 
 // Chatbot-specific request with conversation context
@@ -153,13 +179,23 @@ async function doChatRequest(sessionId, messages, maxTokens = 250, status = "SUC
   };
 }
 
+// Helper to emit synthetic events directly (for testing without API calls)
+function emitSyntheticEvent(eventData) {
+  const event = sdk.makeEvent(eventData);
+  sdk.emit(event);
+  calls.push({ ...event, text: undefined });
+  return event;
+}
+
 async function runScenario(input) {
   const scenario = input.scenario || "normal";
   const feature = input.feature || "resume.builder";
   const text = String(input.text || "Create a resume for a software engineer with five years of Node.js, React, PostgreSQL, and cloud experience.").slice(0, 280_000);
-  const sessionId = `demo-${scenario}-${Date.now()}`;
+  // Use a shared session ID for scenarios that need correlation
+  const sessionId = input.useSharedSession ? `demo-shared-${Date.now()}` : `demo-${scenario}-${Date.now()}`;
   const outputs = [];
   const started = calls.length;
+  const getDefaultAction = (feat) => actions[feat] || actions["resume.builder"];
   const run = async (featureId, prompt, opts) => {
     const result = await doCall(featureId, prompt, sessionId, opts);
     outputs.push({ featureId, text: result.text, usage: result.usage, model: result.model });
@@ -167,12 +203,36 @@ async function runScenario(input) {
   };
 
   if (scenario === "duplicate") {
-    const prompt = (actions[feature] || actions["resume.builder"])(text);
+    const prompt = getDefaultAction(feature)(text);
     await run(`${scenario}.${feature}`, prompt);
     await run(`${scenario}.${feature}`, prompt); // same prompt hash, separate event IDs
   } else if (scenario === "retry-loop") {
-    const prompt = `${actions[feature] || actions["career.chatbot"](text)}\nRespond in one sentence.`;
-    for (let i = 0; i < 5; i++) await run(`${scenario}.${feature}`, prompt, { maxTokens: 70 });
+    // Generate a coherent prompt for retry simulation
+    const prompt = `${getDefaultAction(feature)(text)}\nRespond in one sentence.`;
+    // Make 5 rapid calls with same sessionId to trigger RETRY_LOOP detector
+    // The detector requires: 5+ calls < 2000ms apart, same session/model combination
+    const sharedSessionId = `retry-loop-${Date.now()}`;
+    for (let i = 0; i < 5; i++) {
+      // Emit synthetic events with rapid timing
+      const timestamp = new Date(Date.now() + i * 400); // 400ms intervals = under 2s threshold
+      const event = emitSyntheticEvent({
+        featureId: `${scenario}.${feature}`,
+        prompt,
+        sessionId: sharedSessionId,
+        model: "gemini-1.5-flash",
+        status: i === 0 ? "SUCCESS" : "ERROR", // First call succeeds, others fail (simulating retries)
+        inputTokens: 50,
+        outputTokens: 30,
+        latencyMs: 100,
+        occurredAt: timestamp.toISOString()
+      });
+      outputs.push({
+        featureId: `${scenario}.${feature}`,
+        text: `Synthetic retry call ${i+1}`,
+        usage: { inputTokens: 50, outputTokens: 30, totalTokens: 80 },
+        model: "gemini-1.5-flash"
+      });
+    }
   } else if (scenario === "unbounded-context") {
     const transcript = [];
     for (let i = 1; i <= 5; i++) {
@@ -182,15 +242,89 @@ async function runScenario(input) {
   } else if (scenario === "oversized-prompt") {
     // Roughly 50k+ tokens for English text. Gemini/model limits and cost apply.
     const bulk = (text || "resume experience skills projects ").repeat(Math.ceil(260_000 / Math.max(1, text.length)));
-    await run(`${scenario}.${feature}`, `${actions[feature] || actions["document.summarization"](text)}\n\nSource material:\n${bulk}`, { maxTokens: 120 });
+    await run(`${scenario}.${feature}`, `${getDefaultAction("document.summarization")(text)}\n\nSource material:\n${bulk}`, { maxTokens: 120 });
   } else if (scenario === "spend-spike") {
-    // Prior one-hour window gets one small baseline event; current window gets four larger calls.
-    const base = actions["career.chatbot"]("Reply with one brief career tip.");
-    const baseline = await sdk.complete({ featureId: `${scenario}.baseline`, prompt: base, sessionId, maxTokens: 20, occurredAt: new Date(Date.now() - 90 * 60_000).toISOString(), deferEmit: true });
-    sdk.emit(baseline.event);
-    for (let i = 0; i < 4; i++) await run(`${scenario}.${feature}`, `${actions[feature] || actions["document.creation"](text)}\nProvide a detailed answer with examples, sections, and practical recommendations.`, { maxTokens: 700 });
+    // Prior window gets one small baseline event; current window gets four larger calls
+    // Detection compares current window against previous equal-length window
+    const base = getDefaultAction("career.chatbot")("Reply with one brief career tip.");
+    // Emit baseline event 95 minutes ago (in a different window)
+    const baselineEvent = sdk.makeEvent({
+      featureId: `${scenario}.baseline`,
+      prompt: base,
+      sessionId: `spike-baseline-${Date.now()}`,
+      maxTokens: 20,
+      status: "SUCCESS",
+      inputTokens: 10,
+      outputTokens: 15,
+      latencyMs: 120,
+      occurredAt: new Date(Date.now() - 95 * 60_000).toISOString()
+    });
+    sdk.emit(baselineEvent);
+    calls.push({ ...baselineEvent, text: undefined });
+    // Current window gets 4 larger calls to trigger spike detection
+    for (let i = 0; i < 4; i++) {
+      await run(`${scenario}.${feature}`, `${getDefaultAction(feature)(text)}\nProvide a detailed answer with examples, sections, and practical recommendations in a thorough manner.`, {
+        maxTokens: 800,
+        inputTokens: 100 + i * 50,
+        outputTokens: 500 + i * 100
+      });
+    }
+  } else if (scenario === "anomaly-detection") {
+    // For anomaly detection, we need records with cost data for Isolation Forest
+    // We'll use the run() function which goes through the SDK and gets cost estimation
+    const baselinePrompt = getDefaultAction("career.chatbot")(text);
+    const anomalySessionId = `anomaly-baseline-${Date.now()}`;
+
+    // Generate 7 baseline requests with normal patterns
+    // These establish the "normal" baseline for comparison
+    for (let i = 0; i < 7; i++) {
+      await run(`${scenario}.baseline`, baselinePrompt, {
+        sessionId: anomalySessionId,
+        maxTokens: 100 + i * 10, // Normal output range
+        status: "SUCCESS"
+      });
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    // Generate anomalous patterns that Isolation Forest will detect
+    // Pattern 1: Large token count (cost outlier)
+    await run(`${scenario}.large-tokens`, "Analyze this comprehensive dataset covering multiple domains in detail...", {
+      sessionId: anomalySessionId,
+      maxTokens: 800,
+      inputTokens: 45000,  // Anomaly: much higher than normal (simulated)
+      outputTokens: 8000,
+      latencyMs: 180
+    });
+
+    // Pattern 2: High latency outlier
+    await run(`${scenario}.slow-latency`, baselinePrompt, {
+      sessionId: anomalySessionId,
+      maxTokens: 100,
+      latencyMs: 45000, // 45 seconds - anomaly in latency dimension
+      status: "SUCCESS"
+    });
+
+    // Pattern 3: Burst/rapid-fire pattern (many requests quickly)
+    const burstSessionId = `anomaly-burst-${Date.now()}`;
+    for (let i = 0; i < 10; i++) {
+      await run(`${scenario}.burst`, `Quick analysis query ${i}: What is concept ${i}?`, {
+        sessionId: burstSessionId,
+        maxTokens: 30,
+        latencyMs: 80 // Very fast burst
+      });
+      await new Promise(r => setTimeout(r, 50)); // Rapid succession
+    }
+
+    // Pattern 4: Extremely high cost pattern (very large tokens)
+    await run(`${scenario}.high-cost`, "Process this extensive documentation and provide comprehensive analysis...", {
+      sessionId: anomalySessionId,
+      maxTokens: 4000,
+      inputTokens: 60000,
+      outputTokens: 40000,
+      latencyMs: 220
+    });
   } else {
-    await run(feature, (actions[feature] || actions["resume.builder"])(text));
+    await run(feature, getDefaultAction(feature)(text));
   }
 
   await sdk.flush();
