@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { DetectionRunStatus, FindingStatus, Prisma } from '@prisma/client';
+import { DetectionRunStatus, DetectorType, FindingStatus, Prisma } from '@prisma/client';
 
 import {
   BadRequestAppException,
@@ -43,57 +43,174 @@ export class DetectionService {
     dto: TriggerDetectionRunDto,
     triggeredByUserId: string | null,
   ): Promise<DetectionRunResponseDto> {
+    const created = await this.createRunRow(organizationId, dto, triggeredByUserId, false);
+    if (!created) throw new BadRequestAppException('A matching detection run is already active.');
+    if (created.created) this.executeInBackground(created.run.id, organizationId, dto);
+    return mapRunToDto(created.run);
+  }
+
+  /**
+   * Scheduled runs use the same detector and persistence path as manual runs,
+   * but await completion so the scheduler can apply bounded concurrency and
+   * report the final result for this detector.
+   */
+  async triggerScheduledRun(
+    organizationId: string,
+    dto: TriggerDetectionRunDto,
+  ): Promise<DetectionRunResponseDto | null> {
+    const created = await this.createRunRow(organizationId, dto, null, true);
+    if (!created || !created.created) return null;
+
+    await this.executeRunAsync(created.run.id, organizationId, dto, true);
+    return this.getRun(organizationId, created.run.id);
+  }
+
+  private executeInBackground(
+    runId: string,
+    organizationId: string,
+    dto: TriggerDetectionRunDto,
+  ): void {
+    void this.executeRunAsync(runId, organizationId, dto, false).catch((error: unknown) => {
+      this.logger.error(
+        JSON.stringify({
+          event: 'detection_run_unhandled_failure',
+          runId,
+          error: error instanceof Error ? error.message : 'Detector execution failed.',
+        }),
+      );
+    });
+  }
+
+  private async createRunRow(
+    organizationId: string,
+    dto: TriggerDetectionRunDto,
+    triggeredByUserId: string | null,
+    scheduled: boolean,
+  ): Promise<{
+    run: Prisma.DetectionRunGetPayload<Record<string, never>>;
+    created: boolean;
+  } | null> {
     if (!this.registry.has(dto.detectorType)) {
       throw new BadRequestAppException(`Detector type "${dto.detectorType}" is not registered.`);
     }
 
-    const project = await this.prisma.project.findFirst({
-      where: { id: dto.projectId, organizationId },
-      select: { id: true },
-    });
-    if (!project) throw new NotFoundAppException('Project', dto.projectId);
-
     const detector = this.registry.get(dto.detectorType);
-    const run = await this.prisma.detectionRun.create({
-      data: {
-        organizationId,
-        projectId: dto.projectId,
-        detectorType: dto.detectorType,
-        detectorVersion: detector?.version ?? '1.0.0',
-        status: DetectionRunStatus.PENDING,
-        windowStart: dto.windowStart,
-        windowEnd: dto.windowEnd,
-        triggeredByUserId,
-      },
+    const lockKey = `aclp:detection:${organizationId}:${dto.projectId}:${dto.detectorType}`;
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Transaction-scoped PostgreSQL advisory locking serializes manual and
+      // scheduled run creation across backend instances without a lock table.
+      await tx.$queryRaw`
+        WITH aclp_lock AS MATERIALIZED (
+          SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))
+        )
+        SELECT 1 FROM aclp_lock
+      `;
+
+      const project = await tx.project.findFirst({
+        where: {
+          id: dto.projectId,
+          organizationId,
+          ...(scheduled ? { status: 'ACTIVE', organization: { is: { status: 'ACTIVE' } } } : {}),
+        },
+        select: { id: true },
+      });
+      if (!project) {
+        if (scheduled) return null;
+        throw new NotFoundAppException('Project', dto.projectId);
+      }
+
+      const activeRun = await tx.detectionRun.findFirst({
+        where: {
+          organizationId,
+          projectId: dto.projectId,
+          detectorType: dto.detectorType,
+          status: { in: [DetectionRunStatus.PENDING, DetectionRunStatus.RUNNING] },
+          // Scheduled work must not overlap any run. Manual runs retain their
+          // established concurrent-run behavior but do not duplicate an active
+          // scheduled run for the same project and detector.
+          ...(!scheduled ? { triggeredByUserId: null } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (activeRun) return scheduled ? null : { run: activeRun, created: false };
+
+      if (scheduled) {
+        const sameWindowRun = await tx.detectionRun.findFirst({
+          where: {
+            organizationId,
+            projectId: dto.projectId,
+            detectorType: dto.detectorType,
+            triggeredByUserId: null,
+            windowStart: dto.windowStart,
+            windowEnd: dto.windowEnd,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (sameWindowRun) return null;
+      }
+
+      const run = await tx.detectionRun.create({
+        data: {
+          organizationId,
+          projectId: dto.projectId,
+          detectorType: dto.detectorType,
+          detectorVersion: detector?.version ?? '1.0.0',
+          status: DetectionRunStatus.PENDING,
+          windowStart: dto.windowStart,
+          windowEnd: dto.windowEnd,
+          triggeredByUserId,
+        },
+      });
+      return { run, created: true };
     });
 
-    this.executeRunAsync(run.id, organizationId, dto).catch((err) => {
-      this.logger.error(`Detection run ${run.id} failed unexpectedly: ${err.message}`, err.stack);
-    });
-
-    return mapRunToDto(run);
+    // Scheduled projects can be archived between enumeration and execution,
+    // or another instance may already own this detector/window.
+    if (!result && !scheduled)
+      throw new BadRequestAppException('A matching detection run is already active.');
+    return result;
   }
 
   private async executeRunAsync(
     runId: string,
     organizationId: string,
     dto: TriggerDetectionRunDto,
+    scheduled = false,
   ): Promise<void> {
     const detector = this.registry.get(dto.detectorType);
     if (!detector) return;
 
+    const timeoutMs = this.config.detection?.timeoutMs ?? 30_000;
+    const runMetrics = {
+      recordsScanned: 0,
+      findingsCreated: 0,
+      findingsMatched: 0,
+      alertsCreated: 0,
+      alertsUpdated: 0,
+    };
+    const startedAt = Date.now();
     await this.prisma.detectionRun.update({
       where: { id: runId },
-      data: { status: DetectionRunStatus.RUNNING, startedAt: new Date() },
+      data: { status: DetectionRunStatus.RUNNING, startedAt: new Date(startedAt) },
     });
 
     try {
-      const result = await detector.run({
-        organizationId,
-        projectId: dto.projectId,
-        windowStart: dto.windowStart,
-        windowEnd: dto.windowEnd,
-      });
+      // The detector transaction is read-only and applies a database statement
+      // timeout. Analytics requests have their own AbortController timeout.
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT set_config('statement_timeout', ${`${timeoutMs}ms`}, true)`;
+          return detector.run({
+            organizationId,
+            projectId: dto.projectId,
+            windowStart: dto.windowStart,
+            windowEnd: dto.windowEnd,
+            db: tx,
+          });
+        },
+        { maxWait: 5_000, timeout: timeoutMs },
+      );
+      runMetrics.recordsScanned = result.recordsScanned;
 
       const persisted = await this.prisma.$transaction(async (tx) => {
         const persistedFindings = result.findings.map((finding) => {
@@ -124,30 +241,8 @@ export class DetectionService {
           }
         }
 
-        const inserted = persistedFindings.length
-          ? await tx.detectionFinding.createMany({
-              data: persistedFindings.map(({ finding, fingerprint, issueKey }) => ({
-                organizationId,
-                detectionRunId: runId,
-                detectorType: dto.detectorType,
-                detectorVersion: detector?.version ?? '1.0.0',
-                projectId: dto.projectId,
-                title: finding.title,
-                explanation: finding.explanation,
-                severity: finding.severity,
-                evidence: finding.evidence as Prisma.InputJsonValue,
-                estimatedRecoverableCost: finding.estimatedRecoverableCost
-                  ? new Prisma.Decimal(finding.estimatedRecoverableCost)
-                  : null,
-                fingerprint,
-                issueKey,
-                windowStart: dto.windowStart,
-                windowEnd: dto.windowEnd,
-                status: FindingStatus.OPEN,
-              })),
-              skipDuplicates: true,
-            })
-          : { count: 0 };
+        let findingsCreated = 0;
+        let findingsMatched = 0;
 
         const alerts: Array<{
           id: string;
@@ -161,51 +256,84 @@ export class DetectionService {
         }> = [];
 
         for (const { finding, fingerprint, usageRecordIds, issueKey } of persistedFindings) {
-          const where = {
-            projectId_detectorType_fingerprint: {
-              projectId: dto.projectId,
-              detectorType: dto.detectorType,
-              fingerprint,
-            },
+          const existingIssue = scheduled
+            ? await tx.detectionFinding.findFirst({
+                where: {
+                  organizationId,
+                  projectId: dto.projectId,
+                  detectorType: dto.detectorType,
+                  issueKey,
+                  status: { in: [FindingStatus.OPEN, FindingStatus.ACKNOWLEDGED] },
+                },
+                orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+              })
+            : null;
+
+          const findingData = {
+            detectionRunId: runId,
+            detectorVersion: detector.version,
+            title: finding.title,
+            explanation: finding.explanation,
+            severity: finding.severity,
+            evidence: finding.evidence as Prisma.InputJsonValue,
+            estimatedRecoverableCost: finding.estimatedRecoverableCost
+              ? new Prisma.Decimal(finding.estimatedRecoverableCost)
+              : null,
+            issueKey,
+            windowStart: dto.windowStart,
+            windowEnd: dto.windowEnd,
           };
-          const created = await tx.detectionFinding.upsert({
-            where,
-            create: {
-              organizationId,
-              detectionRunId: runId,
-              detectorType: dto.detectorType,
-              detectorVersion: detector?.version ?? '1.0.0',
-              projectId: dto.projectId,
-              title: finding.title,
-              explanation: finding.explanation,
-              severity: finding.severity,
-              evidence: finding.evidence as Prisma.InputJsonValue,
-              estimatedRecoverableCost: finding.estimatedRecoverableCost
-                ? new Prisma.Decimal(finding.estimatedRecoverableCost)
-                : null,
-              fingerprint,
-              issueKey,
-              windowStart: dto.windowStart,
-              windowEnd: dto.windowEnd,
-              status: FindingStatus.OPEN,
-            },
-            update: {
-              detectionRunId: runId,
-              detectorVersion: detector?.version ?? '1.0.0',
-              title: finding.title,
-              explanation: finding.explanation,
-              severity: finding.severity,
-              evidence: finding.evidence as Prisma.InputJsonValue,
-              estimatedRecoverableCost: finding.estimatedRecoverableCost
-                ? new Prisma.Decimal(finding.estimatedRecoverableCost)
-                : null,
-              windowStart: dto.windowStart,
-              windowEnd: dto.windowEnd,
-            },
-          });
+          let savedFinding;
+          if (existingIssue) {
+            savedFinding = await tx.detectionFinding.update({
+              where: { id: existingIssue.id },
+              data: findingData,
+            });
+            findingsMatched += 1;
+          } else {
+            // createMany(skipDuplicates) uses PostgreSQL's conflict-safe insert
+            // and returns the actual insert count, so simultaneous manual runs
+            // do not fail or overcount the same fingerprint.
+            const inserted = await tx.detectionFinding.createMany({
+              data: [
+                {
+                  organizationId,
+                  projectId: dto.projectId,
+                  detectorType: dto.detectorType,
+                  ...findingData,
+                  fingerprint,
+                  status: FindingStatus.OPEN,
+                },
+              ],
+              skipDuplicates: true,
+            });
+            const fingerprintMatch = await tx.detectionFinding.findUnique({
+              where: {
+                projectId_detectorType_fingerprint: {
+                  projectId: dto.projectId,
+                  detectorType: dto.detectorType,
+                  fingerprint,
+                },
+              },
+            });
+            if (!fingerprintMatch) {
+              throw new Error('Finding insert did not return its persisted row.');
+            }
+
+            if (inserted.count > 0) {
+              savedFinding = fingerprintMatch;
+              findingsCreated += 1;
+            } else {
+              savedFinding = await tx.detectionFinding.update({
+                where: { id: fingerprintMatch.id },
+                data: findingData,
+              });
+              findingsMatched += 1;
+            }
+          }
 
           alerts.push({
-            id: created.id,
+            id: savedFinding.id,
             projectId: dto.projectId,
             title: finding.title,
             description: finding.explanation,
@@ -217,11 +345,11 @@ export class DetectionService {
             issueKey,
           });
 
-          await tx.findingUsageLink.deleteMany({ where: { findingId: created.id } });
+          await tx.findingUsageLink.deleteMany({ where: { findingId: savedFinding.id } });
           if (usageRecordIds.length > 0) {
             await tx.findingUsageLink.createMany({
               data: usageRecordIds.map((usageRecordId) => ({
-                findingId: created.id,
+                findingId: savedFinding.id,
                 usageRecordId,
                 role: finding.usageRecordIds.find((ref) => ref.id === usageRecordId)?.role ?? null,
               })),
@@ -230,11 +358,26 @@ export class DetectionService {
           }
         }
 
-        return { alerts, findingsCreated: inserted.count };
+        return { alerts, findingsCreated, findingsMatched };
       });
+      runMetrics.findingsCreated = persisted.findingsCreated;
+      runMetrics.findingsMatched = persisted.findingsMatched;
 
+      const alertActions = new Map<string, 'created' | 'updated'>();
       for (const finding of persisted.alerts) {
-        await this.alertsService.createAlertFromFinding(organizationId, finding);
+        const outcome = await this.alertsService.createAlertFromFinding(organizationId, finding);
+        const previous = alertActions.get(outcome.alertId);
+        if (outcome.action === 'created' || previous === 'created') {
+          alertActions.set(outcome.alertId, 'created');
+        } else if (outcome.action === 'updated') {
+          alertActions.set(outcome.alertId, 'updated');
+        }
+        runMetrics.alertsCreated = [...alertActions.values()].filter(
+          (value) => value === 'created',
+        ).length;
+        runMetrics.alertsUpdated = [...alertActions.values()].filter(
+          (value) => value === 'updated',
+        ).length;
       }
 
       await this.prisma.detectionRun.update({
@@ -242,15 +385,22 @@ export class DetectionService {
         data: {
           status: DetectionRunStatus.COMPLETED,
           completedAt: new Date(),
-          recordsScanned: result.recordsScanned,
-          findingsCreated: persisted.findingsCreated,
+          ...runMetrics,
         },
       });
 
       this.logger.log(
-        `Detection run ${runId} completed: ${result.recordsScanned} records examined, ${result.findings.length} detector result(s), ${persisted.findingsCreated} new finding row(s) created.`,
+        JSON.stringify({
+          event: 'detection_run_completed',
+          runId,
+          organizationId,
+          projectId: dto.projectId,
+          detectorType: dto.detectorType,
+          durationMs: Date.now() - startedAt,
+          ...runMetrics,
+        }),
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       await this.prisma.detectionRun
         .update({
           where: { id: runId },
@@ -258,11 +408,18 @@ export class DetectionService {
             status: DetectionRunStatus.FAILED,
             completedAt: new Date(),
             error: safeDetectionFailure(error),
+            ...runMetrics,
           },
         })
-        .catch((e: any) =>
-          this.logger.error(`Failed to mark run ${runId} as FAILED: ${e.message}`),
-        );
+        .catch((cause: unknown) => {
+          this.logger.error(
+            JSON.stringify({
+              event: 'detection_run_failed_to_persist_status',
+              runId,
+              error: cause instanceof Error ? cause.message : 'Database update failed.',
+            }),
+          );
+        });
 
       throw error;
     }
@@ -371,6 +528,52 @@ export class DetectionService {
   listRegisteredDetectors() {
     return this.registry.listRegistered();
   }
+
+  async getSchedulerStatus(
+    organizationId: string,
+    projectId: string,
+    scheduler: {
+      enabled: boolean;
+      intervalMs: number;
+      lookbackMs: number;
+      detectors: DetectorType[];
+      maxConcurrency: number;
+      timeoutMs: number;
+      nextRunAt: string | null;
+      lastCycleStartedAt: string | null;
+      lastCycleFinishedAt: string | null;
+      lastCycleStatus: string;
+    },
+  ) {
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, organizationId },
+      select: { id: true },
+    });
+    if (!project) throw new NotFoundAppException('Project', projectId);
+
+    const scheduledWhere: Prisma.DetectionRunWhereInput = {
+      organizationId,
+      projectId,
+      triggeredByUserId: null,
+    };
+    const [lastScheduledRun, lastSuccessfulRun] = await Promise.all([
+      this.prisma.detectionRun.findFirst({
+        where: scheduledWhere,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.detectionRun.findFirst({
+        where: { ...scheduledWhere, status: DetectionRunStatus.COMPLETED },
+        orderBy: { completedAt: 'desc' },
+      }),
+    ]);
+
+    return {
+      ...scheduler,
+      projectId,
+      lastScheduledRun: lastScheduledRun ? mapRunToDto(lastScheduledRun) : null,
+      lastSuccessfulRun: lastSuccessfulRun ? mapRunToDto(lastSuccessfulRun) : null,
+    };
+  }
 }
 
 function createFindingFingerprint(input: {
@@ -441,8 +644,12 @@ function mapRunToDto(run: any): DetectionRunResponseDto {
       run.completedAt instanceof Date ? run.completedAt.toISOString() : (run.completedAt ?? null),
     recordsScanned: run.recordsScanned,
     findingsCreated: run.findingsCreated,
+    findingsMatched: run.findingsMatched ?? 0,
+    alertsCreated: run.alertsCreated ?? 0,
+    alertsUpdated: run.alertsUpdated ?? 0,
     error: run.error ?? null,
     triggeredByUserId: run.triggeredByUserId ?? null,
+    triggerSource: run.triggeredByUserId == null ? 'scheduled' : 'manual',
     createdAt: run.createdAt instanceof Date ? run.createdAt.toISOString() : run.createdAt,
     updatedAt: run.updatedAt instanceof Date ? run.updatedAt.toISOString() : run.updatedAt,
   };

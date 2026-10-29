@@ -343,6 +343,78 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
     ).toBe(2);
   });
 
+  it('deduplicates repeated scheduled windows and refreshes one active issue with accurate counts', async () => {
+    const issueKey = `scheduled-issue-${randomUUID()}`;
+    const detector: Detector = {
+      type: DetectorType.ANOMALY_ISOLATION_FOREST,
+      kind: DetectorKind.ADVANCED,
+      version: 'scheduled-integration-test',
+      description: 'Scheduled persistence integration test.',
+      run: async () => ({
+        recordsScanned: 4,
+        findings: [
+          {
+            title: 'Scheduled repeat candidate',
+            explanation: 'The issue persists across scheduler windows.',
+            severity: Severity.MEDIUM,
+            evidence: { signal: 'stable-scheduled-evidence' },
+            estimatedRecoverableCost: null,
+            fingerprint: issueKey,
+            issueKey,
+            usageRecordIds: [],
+          },
+        ],
+      }),
+    };
+    const registry = new DetectorRegistry();
+    registry.register(detector);
+    const config = {
+      limits: { defaultPageSize: 25, maxPageSize: 100 },
+      detection: { timeoutMs: 30_000 },
+    } as Configuration;
+    const alerts = new AlertsService(prisma as unknown as PrismaService, config);
+    const detection = new DetectionService(
+      prisma as unknown as PrismaService,
+      registry,
+      config,
+      alerts,
+    );
+    const firstWindow = {
+      detectorType: detector.type,
+      projectId,
+      windowStart: new Date('2026-10-20T00:00:00.000Z'),
+      windowEnd: new Date('2026-10-20T00:10:00.000Z'),
+    };
+
+    const firstRun = await detection.triggerScheduledRun(organizationId, firstWindow);
+    expect(firstRun?.status).toBe('COMPLETED');
+    expect(firstRun).toMatchObject({ findingsCreated: 1, findingsMatched: 0, alertsCreated: 1 });
+
+    const duplicateWindow = await detection.triggerScheduledRun(organizationId, firstWindow);
+    expect(duplicateWindow).toBeNull();
+
+    const nextWindow = await detection.triggerScheduledRun(organizationId, {
+      ...firstWindow,
+      windowStart: new Date('2026-10-20T00:01:00.000Z'),
+      windowEnd: new Date('2026-10-20T00:11:00.000Z'),
+    });
+    expect(nextWindow).toMatchObject({
+      status: 'COMPLETED',
+      findingsCreated: 0,
+      findingsMatched: 1,
+      alertsCreated: 0,
+      alertsUpdated: 0,
+      recordsScanned: 4,
+    });
+    expect(
+      await prisma.detectionFinding.count({ where: { organizationId, projectId, issueKey } }),
+    ).toBe(1);
+    const finding = await prisma.detectionFinding.findFirstOrThrow({
+      where: { organizationId, projectId, issueKey },
+    });
+    expect(await prisma.alert.count({ where: { organizationId, projectId, findingId: finding.id } })).toBe(1);
+  });
+
   it('deduplicates concurrent AlertsService calls and retains alert lifecycle state', async () => {
     if (!findingId) throw new Error('The preceding finding test did not create its fixture.');
     const alerts = new AlertsService(

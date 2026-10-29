@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma, Severity } from '@prisma/client';
+import { isDeepStrictEqual } from 'node:util';
 
 import { NotFoundAppException } from '../../common/exceptions/app.exception';
 import {
@@ -12,6 +13,11 @@ import type { Configuration } from '../../config/configuration';
 import { PrismaService } from '../../database/prisma.service';
 
 import type { AlertQueryDto, AlertResponseDto, UpdateAlertStatusDto } from './dto/detection.dto';
+
+export interface AlertPersistenceOutcome {
+  alertId: string;
+  action: 'created' | 'updated' | 'unchanged';
+}
 
 @Injectable()
 export class AlertsService {
@@ -34,7 +40,7 @@ export class AlertsService {
       estimatedRecoverableCost: Prisma.Decimal | null;
       issueKey?: string;
     },
-  ): Promise<void> {
+  ): Promise<AlertPersistenceOutcome> {
     // Use issueKey for alert deduplication, fallback to finding id
     const alertIssueKey = finding.issueKey ?? finding.id;
 
@@ -51,42 +57,55 @@ export class AlertsService {
       issueKey: alertIssueKey,
     };
 
-    let alertAction: 'created' | 'refreshed' = 'created';
     try {
-      await this.prisma.$transaction(async (tx) => {
-        // Check if an alert with this issueKey already exists and is not resolved/dismissed
-        const existingAlert = await tx.alert.findFirst({
-          where: {
-            organizationId,
-            projectId: finding.projectId,
-            issueKey: alertIssueKey,
-            status: { in: ['OPEN', 'ACKNOWLEDGED'] },
-          },
-          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
-        });
-
-        if (existingAlert) {
-          // Keep a deduplicated alert linked to the most recent finding while
-          // preserving its lifecycle state and acknowledgment metadata.
-          await tx.alert.update({
-            where: { id: existingAlert.id },
-            data: {
-              findingId: finding.id,
-              title: finding.title,
-              message: finding.description,
-              evidence: finding.evidence as Prisma.InputJsonValue,
-              estimatedRecoverableCost: finding.estimatedRecoverableCost,
+      const outcome = await this.prisma.$transaction(
+        async (tx): Promise<AlertPersistenceOutcome> => {
+          // Check if an alert with this issueKey already exists and is not resolved/dismissed
+          const existingAlert = await tx.alert.findFirst({
+            where: {
+              organizationId,
+              projectId: finding.projectId,
+              issueKey: alertIssueKey,
+              status: { in: ['OPEN', 'ACKNOWLEDGED'] },
             },
+            orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
           });
-          alertAction = 'refreshed';
-          return;
-        }
 
-        // Create new alert - use type assertion to work around stale Prisma types
-        await tx.alert.create({
-          data: alertData as any,
-        });
-      });
+          if (existingAlert) {
+            const changed =
+              existingAlert.findingId !== finding.id ||
+              existingAlert.title !== finding.title ||
+              existingAlert.message !== finding.description ||
+              existingAlert.severity !== finding.severity ||
+              !isDeepStrictEqual(existingAlert.evidence, finding.evidence) ||
+              (existingAlert.estimatedRecoverableCost?.toString() ?? null) !==
+                (finding.estimatedRecoverableCost?.toString() ?? null);
+
+            if (!changed) return { alertId: existingAlert.id, action: 'unchanged' };
+
+            // Keep a deduplicated alert linked to the most recent finding while
+            // preserving its lifecycle state and acknowledgment metadata.
+            await tx.alert.update({
+              where: { id: existingAlert.id },
+              data: {
+                findingId: finding.id,
+                title: finding.title,
+                message: finding.description,
+                evidence: finding.evidence as Prisma.InputJsonValue,
+                estimatedRecoverableCost: finding.estimatedRecoverableCost,
+              },
+            });
+            return { alertId: existingAlert.id, action: 'updated' };
+          }
+
+          const alert = await tx.alert.create({
+            data: alertData as Prisma.AlertUncheckedCreateInput,
+          });
+          return { alertId: alert.id, action: 'created' };
+        },
+      );
+      this.logger.log(`Alert ${outcome.action} for finding ${finding.id} in org ${organizationId}`);
+      return outcome;
     } catch (error) {
       // Concurrent calls may both observe no alert before inserting. The
       // database's unique findingId constraint elects one winner; return that
@@ -101,12 +120,10 @@ export class AlertsService {
               error.meta.target.includes('Alert_findingId_key')))
       ) {
         const winner = await this.prisma.alert.findUnique({ where: { findingId: finding.id } });
-        if (winner) return;
+        if (winner) return { alertId: winner.id, action: 'unchanged' };
       }
       throw error;
     }
-
-    this.logger.log(`Alert ${alertAction} for finding ${finding.id} in org ${organizationId}`);
   }
 
   async listAlerts(
@@ -127,23 +144,10 @@ export class AlertsService {
     const direction = query.sortOrder ?? 'desc';
     const orderBy: Prisma.AlertOrderByWithRelationInput[] =
       query.sortBy === 'severity'
-        ? [
-            { severity: direction },
-            { updatedAt: 'desc' },
-            { createdAt: 'desc' },
-            { id: 'desc' },
-          ]
+        ? [{ severity: direction }, { updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
         : query.sortBy === 'createdAt'
-          ? [
-              { createdAt: direction },
-              { updatedAt: direction },
-              { id: direction },
-            ]
-          : [
-              { updatedAt: direction },
-              { createdAt: direction },
-              { id: direction },
-            ];
+          ? [{ createdAt: direction }, { updatedAt: direction }, { id: direction }]
+          : [{ updatedAt: direction }, { createdAt: direction }, { id: direction }];
 
     const [items, total] = await Promise.all([
       this.prisma.alert.findMany({

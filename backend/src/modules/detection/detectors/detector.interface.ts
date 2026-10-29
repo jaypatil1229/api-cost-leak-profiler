@@ -1,4 +1,4 @@
-import type { DetectorType, DetectorKind, Severity } from '@prisma/client';
+import type { DetectorType, DetectorKind, Prisma, Severity } from '@prisma/client';
 
 export interface DetectorFinding {
   title: string;
@@ -21,6 +21,8 @@ export interface DetectorRunContext {
   projectId: string;
   windowStart: Date;
   windowEnd: Date;
+  /** A bounded, read-only transaction with a statement timeout for this run. */
+  db?: Prisma.TransactionClient;
 }
 
 export interface DetectorResult {

@@ -16,7 +16,9 @@ import { RequireOrgMembership } from '../../common/decorators/authorization.deco
 import type { AuthenticatedUser, OrganizationContext } from '../../common/types/request-context';
 
 import { DetectionService } from './detection.service';
+import { AutomaticDetectionService } from './automatic-detection.service';
 import {
+  DetectionSchedulerQueryDto,
   DetectionRunQueryDto,
   FindingQueryDto,
   TriggerDetectionRunDto,
@@ -26,7 +28,22 @@ import {
 @Controller('organizations/:organizationId/detection')
 @RequireOrgMembership()
 export class DetectionController {
-  constructor(private readonly detectionService: DetectionService) {}
+  constructor(
+    private readonly detectionService: DetectionService,
+    private readonly automaticDetection: AutomaticDetectionService,
+  ) {}
+
+  @Get('scheduler')
+  getSchedulerStatus(
+    @CurrentOrganization() org: OrganizationContext,
+    @Query() query: DetectionSchedulerQueryDto,
+  ) {
+    return this.detectionService.getSchedulerStatus(
+      org.organizationId,
+      query.projectId,
+      this.automaticDetection.getRuntimeStatus(),
+    );
+  }
 
   @Get('detectors')
   listDetectors() {

@@ -657,6 +657,9 @@ model DetectionRun {
 
   recordsScanned  Int @default(0)
   findingsCreated Int @default(0)
+  findingsMatched Int @default(0)
+  alertsCreated   Int @default(0)
+  alertsUpdated   Int @default(0)
 
   error String? @db.VarChar(2000)
 

@@ -75,6 +75,15 @@ export interface DocsConfig {
   path: string;
 }
 
+export interface DetectionConfig {
+  enabled: boolean;
+  intervalMs: number;
+  lookbackMs: number;
+  detectors: 'deterministic' | 'analytics' | 'all';
+  maxConcurrency: number;
+  timeoutMs: number;
+}
+
 export interface Configuration {
   app: AppConfig;
   logging: LoggingConfig;
@@ -85,6 +94,7 @@ export interface Configuration {
   limits: LimitsConfig;
   analytics: AnalyticsConfig;
   docs: DocsConfig;
+  detection: DetectionConfig;
 }
 
 /**
@@ -158,6 +168,14 @@ export function buildConfiguration(env: EnvironmentVariables): Configuration {
       // Swagger is opt-in in production; it is on by default elsewhere.
       enabled: env.SWAGGER_ENABLED,
       path: env.SWAGGER_PATH.replace(/^\/+|\/+$/g, ''),
+    },
+    detection: {
+      enabled: env.AUTOMATED_DETECTION_ENABLED,
+      intervalMs: env.AUTOMATED_DETECTION_INTERVAL_MS,
+      lookbackMs: env.AUTOMATED_DETECTION_LOOKBACK_MS,
+      detectors: env.AUTOMATED_DETECTION_DETECTORS,
+      maxConcurrency: env.AUTOMATED_DETECTION_MAX_CONCURRENCY,
+      timeoutMs: env.AUTOMATED_DETECTION_TIMEOUT_MS,
     },
   };
 }

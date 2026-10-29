@@ -5,7 +5,6 @@ import { AlertsController } from './alerts.controller';
 import { DetectionService } from './detection.service';
 import { AnalyticsClient } from './analytics.client';
 import { AlertsService } from './alerts.service';
-import { DetectionScheduler } from './detection.scheduler';
 import { AutomaticDetectionService } from './automatic-detection.service';
 import {
   DetectorRegistry,
@@ -35,7 +34,6 @@ const DETECTORS = [
     AlertsService,
     DetectorRegistry,
     AnalyticsClient,
-    DetectionScheduler,
     AutomaticDetectionService,
     ...DETECTORS,
   ],

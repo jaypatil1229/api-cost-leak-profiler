@@ -8,7 +8,7 @@ import { toMoneyString } from '../../../common/utils/money.util';
 import type { Detector, DetectorResult, DetectorRunContext } from './detector.interface';
 
 const SPIKE_THRESHOLD_MULTIPLIER = 3;
-const MIN_ABSOLUTE_INCREASE_USD = 0.10; // Minimum $0.10 increase to qualify as spike
+const MIN_ABSOLUTE_INCREASE_USD = 0.1; // Minimum $0.10 increase to qualify as spike
 
 @Injectable()
 export class SpendSpikeDetector implements Detector {
@@ -21,13 +21,14 @@ export class SpendSpikeDetector implements Detector {
   constructor(private readonly prisma: PrismaService) {}
 
   async run(context: DetectorRunContext): Promise<DetectorResult> {
+    const db = context.db ?? this.prisma;
     const windowMs = context.windowEnd.getTime() - context.windowStart.getTime();
     const previousStart = new Date(context.windowStart.getTime() - windowMs);
     const twoWindowsAgoStart = new Date(context.windowStart.getTime() - 2 * windowMs);
 
     // Fetch costs for three windows to handle edge cases where baseline might be in different window
     const [currentAgg, previousAgg, twoWindowsAgoAgg] = await Promise.all([
-      this.prisma.usageRecord.aggregate({
+      db.usageRecord.aggregate({
         where: {
           organizationId: context.organizationId,
           projectId: context.projectId,
@@ -37,7 +38,7 @@ export class SpendSpikeDetector implements Detector {
         _sum: { estimatedTotalCost: true },
         _count: { estimatedTotalCost: true },
       }),
-      this.prisma.usageRecord.aggregate({
+      db.usageRecord.aggregate({
         where: {
           organizationId: context.organizationId,
           projectId: context.projectId,
@@ -47,7 +48,7 @@ export class SpendSpikeDetector implements Detector {
         _sum: { estimatedTotalCost: true },
         _count: { estimatedTotalCost: true },
       }),
-      this.prisma.usageRecord.aggregate({
+      db.usageRecord.aggregate({
         where: {
           organizationId: context.organizationId,
           projectId: context.projectId,
@@ -91,7 +92,7 @@ export class SpendSpikeDetector implements Detector {
         const baselineWindowEnd =
           baselineWindow === 'immediate-previous' ? context.windowStart : previousStart;
         const [currentEvidence, baselineEvidence] = await Promise.all([
-          this.prisma.usageRecord.findMany({
+          db.usageRecord.findMany({
             where: {
               organizationId: context.organizationId,
               projectId: context.projectId,
@@ -100,7 +101,7 @@ export class SpendSpikeDetector implements Detector {
             },
             select: { id: true },
           }),
-          this.prisma.usageRecord.findMany({
+          db.usageRecord.findMany({
             where: {
               organizationId: context.organizationId,
               projectId: context.projectId,
@@ -130,9 +131,7 @@ export class SpendSpikeDetector implements Detector {
             windowCounts: {
               current: currentCount,
               baseline:
-                baselineWindow === 'immediate-previous'
-                  ? previousCount
-                  : twoWindowsAgoCount,
+                baselineWindow === 'immediate-previous' ? previousCount : twoWindowsAgoCount,
             },
           },
           estimatedRecoverableCost: toMoneyString(excess),

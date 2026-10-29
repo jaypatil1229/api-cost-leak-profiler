@@ -77,11 +77,29 @@ export class DetectionRunResponseDto {
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   triggeredByUserId!: string | null;
 
+  @ApiProperty({ enum: ['manual', 'scheduled'] })
+  triggerSource!: 'manual' | 'scheduled';
+
+  @ApiProperty({ minimum: 0 })
+  findingsMatched!: number;
+
+  @ApiProperty({ minimum: 0 })
+  alertsCreated!: number;
+
+  @ApiProperty({ minimum: 0 })
+  alertsUpdated!: number;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: string;
+}
+
+export class DetectionSchedulerQueryDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  projectId!: string;
 }
 
 // ── Detection Finding DTOs ─────────────────────────────────────────

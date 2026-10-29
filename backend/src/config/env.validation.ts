@@ -239,6 +239,39 @@ export class EnvironmentVariables {
 
   @IsString()
   SWAGGER_PATH = 'docs';
+
+  // --- automatic detection -----------------------------------------------
+
+  @Transform(toBoolean)
+  @IsBoolean()
+  AUTOMATED_DETECTION_ENABLED = true;
+
+  @Transform(toInt)
+  @IsInt()
+  @Min(15_000)
+  @Max(86_400_000)
+  AUTOMATED_DETECTION_INTERVAL_MS = 60_000;
+
+  @Transform(toInt)
+  @IsInt()
+  @Min(60_000)
+  @Max(31 * 24 * 60 * 60 * 1000)
+  AUTOMATED_DETECTION_LOOKBACK_MS = 600_000;
+
+  @IsIn(['deterministic', 'analytics', 'all'])
+  AUTOMATED_DETECTION_DETECTORS: 'deterministic' | 'analytics' | 'all' = 'deterministic';
+
+  @Transform(toInt)
+  @IsInt()
+  @Min(1)
+  @Max(16)
+  AUTOMATED_DETECTION_MAX_CONCURRENCY = 4;
+
+  @Transform(toInt)
+  @IsInt()
+  @Min(1_000)
+  @Max(120_000)
+  AUTOMATED_DETECTION_TIMEOUT_MS = 30_000;
 }
 
 /**

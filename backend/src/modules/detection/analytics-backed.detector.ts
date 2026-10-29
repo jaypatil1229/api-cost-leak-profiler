@@ -18,7 +18,8 @@ abstract class AnalyticsBackedDetector implements Detector {
   ) {}
 
   async run(context: DetectorRunContext): Promise<DetectorResult> {
-    const records = await this.prisma.usageRecord.findMany({
+    const db = context.db ?? this.prisma;
+    const records = await db.usageRecord.findMany({
       where: {
         organizationId: context.organizationId,
         projectId: context.projectId,

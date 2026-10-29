@@ -1,178 +1,299 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { DetectorType } from '@prisma/client';
-import { PrismaService } from '../../database/prisma.service';
-import { DetectionService } from '../detection/detection.service';
 
-/**
- * Automatic detection runner for scheduled analysis.
- *
- * This service provides automatic detection runs that can be configured via
- * environment variables. It runs lightweight deterministic detectors more
- * frequently and optionally runs expensive ML-based analytics detectors.
- *
- * Configuration (set in backend/.env):
- * - AUTOMATED_DETECTION_ENABLED=true - Enable automatic detection runs
- * - AUTOMATED_DETECTION_INTERVAL_MS=300000 - Interval in milliseconds (default: 5 minutes)
- * - AUTOMATED_DETECTION_LOOKBACK_MS=600000 - Lookback window in milliseconds (default: 10 minutes)
- * - AUTOMATED_DETECTION_DETECTORS=all - Which detectors to run: all|deterministic|analytics
- *
- * Note: Analytics detectors (ISOLATION_FOREST) will fail gracefully if the Python
- * analytics service is not configured or unavailable.
- */
+import { APP_CONFIG } from '../../config/config.module';
+import type { Configuration } from '../../config/configuration';
+import { PrismaService } from '../../database/prisma.service';
+
+import { DetectionService } from './detection.service';
+
+const DETERMINISTIC_DETECTORS: DetectorType[] = [
+  DetectorType.DUPLICATE_PROMPT,
+  DetectorType.RETRY_LOOP,
+  DetectorType.UNBOUNDED_CONTEXT,
+  DetectorType.OVERSIZED_PROMPT,
+  DetectorType.SPEND_SPIKE,
+];
+
+interface ScheduledTask {
+  organizationId: string;
+  projectId: string;
+  detectorType: DetectorType;
+  windowStart: Date;
+  windowEnd: Date;
+}
 
 @Injectable()
-export class AutomaticDetectionService implements OnModuleInit, OnModuleDestroy {
+export class AutomaticDetectionService
+  implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy
+{
   private readonly logger = new Logger(AutomaticDetectionService.name);
-
-  // Configuration
-  private readonly enabled = this.getConfig('AUTOMATED_DETECTION_ENABLED', 'true') === 'true';
-  private readonly intervalMs =
-    parseInt(this.getConfig('AUTOMATED_DETECTION_INTERVAL_MS', '300000'), 10) || 300000; // 5 minutes
-  private readonly lookbackMs =
-    parseInt(this.getConfig('AUTOMATED_DETECTION_LOOKBACK_MS', '600000'), 10) || 600000; // 10 minutes
-  private readonly detectorsConfig = this.getConfig('AUTOMATED_DETECTION_DETECTORS', 'all');
-
-  private intervalId: ReturnType<typeof setInterval> | null = null;
-
-  private readonly detectors: DetectorType[] = [
-    DetectorType.DUPLICATE_PROMPT,
-    DetectorType.RETRY_LOOP,
-    DetectorType.UNBOUNDED_CONTEXT,
-    DetectorType.OVERSIZED_PROMPT,
-    DetectorType.SPEND_SPIKE,
-    DetectorType.ANOMALY_ISOLATION_FOREST,
-  ];
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private runningCycle: Promise<void> | null = null;
+  private stopping = false;
+  private nextRunAt: Date | null = null;
+  private lastCycleStartedAt: Date | null = null;
+  private lastCycleFinishedAt: Date | null = null;
+  private lastCycleStatus: 'idle' | 'running' | 'completed' | 'partially_failed' | 'failed' =
+    'idle';
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly detectionService: DetectionService,
+    @Inject(APP_CONFIG) private readonly config: Configuration,
   ) {}
 
   onModuleInit(): void {
-    if (!this.enabled) {
-      this.logger.log('Automatic detection is disabled');
+    const detection = this.config.detection;
+    if (!detection.enabled) {
+      this.logger.log('Automatic detection is disabled by deployment configuration.');
       return;
     }
 
     this.logger.log(
-      `Automatic detection starting: interval=${this.intervalMs}ms, lookback=${this.lookbackMs}ms, detectors=${this.detectorsConfig}`,
+      JSON.stringify({
+        event: 'detection_scheduler_started',
+        intervalMs: detection.intervalMs,
+        lookbackMs: detection.lookbackMs,
+        detectors: this.getDetectorsToRun(),
+        maxConcurrency: detection.maxConcurrency,
+        timeoutMs: detection.timeoutMs,
+      }),
     );
-
-    // Run immediately on startup
-    this.triggerDetectionRuns();
-
-    // Then schedule recurring runs
-    this.intervalId = setInterval(() => {
-      this.triggerDetectionRuns();
-    }, this.intervalMs);
+    this.scheduleNextTick();
   }
 
-  onModuleDestroy(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.logger.log('Automatic detection scheduler stopped');
-    }
+  onApplicationBootstrap(): void {
+    if (this.config.detection.enabled) void this.triggerDetectionRuns();
   }
 
-  private getConfig(key: string, defaultValue: string): string {
-    return process.env[key] || defaultValue;
+  async onModuleDestroy(): Promise<void> {
+    this.stopping = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.nextRunAt = null;
+    if (this.runningCycle) await this.runningCycle;
+    this.logger.log('Automatic detection scheduler stopped.');
+  }
+
+  getRuntimeStatus() {
+    return {
+      enabled: this.config.detection.enabled,
+      intervalMs: this.config.detection.intervalMs,
+      lookbackMs: this.config.detection.lookbackMs,
+      detectors: this.getDetectorsToRun(),
+      maxConcurrency: this.config.detection.maxConcurrency,
+      timeoutMs: this.config.detection.timeoutMs,
+      nextRunAt: this.nextRunAt?.toISOString() ?? null,
+      lastCycleStartedAt: this.lastCycleStartedAt?.toISOString() ?? null,
+      lastCycleFinishedAt: this.lastCycleFinishedAt?.toISOString() ?? null,
+      lastCycleStatus: this.lastCycleStatus,
+    };
   }
 
   private getDetectorsToRun(): DetectorType[] {
-    switch (this.detectorsConfig.toLowerCase()) {
-      case 'deterministic':
-        return this.detectors.filter(
-          (d) =>
-            d === DetectorType.DUPLICATE_PROMPT ||
-            d === DetectorType.RETRY_LOOP ||
-            d === DetectorType.UNBOUNDED_CONTEXT ||
-            d === DetectorType.OVERSIZED_PROMPT ||
-            d === DetectorType.SPEND_SPIKE,
-        );
-      case 'analytics':
-        return this.detectors.filter((d) => d === DetectorType.ANOMALY_ISOLATION_FOREST);
-      case 'all':
-      default:
-        return this.detectors;
-    }
+    const mode = this.config.detection.detectors;
+    // Monitoring always includes all five deterministic detectors. The optional
+    // analytics mode adds Isolation Forest; semantic analysis needs prompt text
+    // that the normal ingestion path intentionally does not retain.
+    return mode === 'deterministic'
+      ? [...DETERMINISTIC_DETECTORS]
+      : [...DETERMINISTIC_DETECTORS, DetectorType.ANOMALY_ISOLATION_FOREST];
   }
 
-  private async triggerDetectionRuns(): Promise<void> {
-    const detectors = this.getDetectorsToRun();
-    if (detectors.length === 0) {
-      this.logger.warn('No detectors configured to run');
-      return;
+  private scheduleNextTick(): void {
+    if (this.stopping || !this.config.detection.enabled) return;
+    const intervalMs = this.config.detection.intervalMs;
+    const now = Date.now();
+    const next = (Math.floor(now / intervalMs) + 1) * intervalMs;
+    this.nextRunAt = new Date(next);
+    this.timer = setTimeout(
+      () => {
+        this.timer = null;
+        void this.triggerDetectionRuns().finally(() => this.scheduleNextTick());
+      },
+      Math.max(1, next - now),
+    );
+  }
+
+  private triggerDetectionRuns(): Promise<void> {
+    if (this.stopping) return Promise.resolve();
+    if (this.runningCycle) {
+      this.logger.warn(
+        JSON.stringify({ event: 'detection_scheduler_cycle_skipped', reason: 'cycle_active' }),
+      );
+      return this.runningCycle;
     }
 
-    const now = new Date();
-    const windowEnd = now;
-    const windowStart = new Date(now.getTime() - this.lookbackMs);
+    const cycle = this.runCycle();
+    this.runningCycle = cycle;
+    void cycle.then(
+      () => {
+        if (this.runningCycle === cycle) this.runningCycle = null;
+      },
+      () => {
+        if (this.runningCycle === cycle) this.runningCycle = null;
+      },
+    );
+    return cycle;
+  }
 
-    this.logger.debug(
-      `Scheduled detection run: ${windowStart.toISOString()} to ${windowEnd.toISOString()}`,
+  private async runCycle(): Promise<void> {
+    const startedAt = new Date();
+    this.lastCycleStartedAt = startedAt;
+    this.lastCycleStatus = 'running';
+    const intervalMs = this.config.detection.intervalMs;
+    const windowEnd = new Date(Math.floor(startedAt.getTime() / intervalMs) * intervalMs);
+    const windowStart = new Date(windowEnd.getTime() - this.config.detection.lookbackMs);
+    const detectors = this.getDetectorsToRun();
+    let projectsScanned = 0;
+    let runsStarted = 0;
+    let runsSkipped = 0;
+    let runsFailed = 0;
+    let findingsCreated = 0;
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'detection_scheduler_cycle_started',
+        startedAt: startedAt.toISOString(),
+        windowStart: windowStart.toISOString(),
+        windowEnd: windowEnd.toISOString(),
+        detectorTypes: detectors,
+      }),
     );
 
     try {
-      // Get all active projects with their organizations
-      const projects = await this.prisma.project.findMany({
-        where: { status: 'ACTIVE' },
-        select: { id: true, organizationId: true },
-        orderBy: { createdAt: 'desc' },
-        take: 100, // Limit to prevent runaway processing
-      });
+      let cursor: string | undefined;
+      while (!this.stopping) {
+        const projects = await this.prisma.project.findMany({
+          where: {
+            status: 'ACTIVE',
+            organization: { is: { status: 'ACTIVE' } },
+            ...(cursor ? { id: { gt: cursor } } : {}),
+          },
+          select: { id: true, organizationId: true },
+          orderBy: { id: 'asc' },
+          take: 100,
+        });
+        if (projects.length === 0) break;
 
-      if (projects.length === 0) {
-        this.logger.debug('No active projects found for automatic detection');
-        return;
-      }
+        projectsScanned += projects.length;
+        const tasks: ScheduledTask[] = projects.flatMap((project) =>
+          detectors.map((detectorType) => ({
+            organizationId: project.organizationId,
+            projectId: project.id,
+            detectorType,
+            windowStart,
+            windowEnd,
+          })),
+        );
 
-      const detectorNames = detectors.map((d) => d.valueOf());
-      this.logger.log(
-        `Automated detection run triggered for ${projects.length} projects, detectors: ${detectorNames.join(', ')}`,
-      );
-
-      // Run each detector for each project
-      for (const project of projects) {
-        for (const detectorType of detectors) {
+        await forEachBounded(tasks, this.config.detection.maxConcurrency, async (task) => {
+          if (this.stopping) return;
+          const queuedAt = Date.now();
           try {
-            await this.detectionService.triggerRun(project.organizationId, {
+            const { organizationId, projectId, detectorType, windowStart, windowEnd } = task;
+            const run = await this.detectionService.triggerScheduledRun(organizationId, {
+              projectId,
               detectorType,
-              projectId: project.id,
               windowStart,
               windowEnd,
-            }, null);
-          } catch (detectorError) {
-            // Log error but continue with other detectors/projects
-            const errorMsg =
-              detectorError instanceof Error ? detectorError.message : String(detectorError);
-            this.logger.warn(
-              `Detection run failed for project=${project.id}, detector=${detectorType}: ${errorMsg}`,
+            });
+            if (!run) {
+              runsSkipped += 1;
+              return;
+            }
+
+            runsStarted += 1;
+            if (run.status === 'FAILED') {
+              runsFailed += 1;
+            } else {
+              findingsCreated += run.findingsCreated;
+            }
+            this.logger.log(
+              JSON.stringify({
+                event: 'detection_scheduler_run_finished',
+                runId: run.id,
+                organizationId: task.organizationId,
+                projectId: task.projectId,
+                detectorType: task.detectorType,
+                status: run.status,
+                durationMs: Date.now() - queuedAt,
+                recordsScanned: run.recordsScanned,
+                findingsCreated: run.findingsCreated,
+                findingsMatched: run.findingsMatched,
+                alertsCreated: run.alertsCreated,
+                alertsUpdated: run.alertsUpdated,
+                error: run.error,
+              }),
+            );
+          } catch (error) {
+            runsFailed += 1;
+            this.logger.error(
+              JSON.stringify({
+                event: 'detection_scheduler_run_failed',
+                organizationId: task.organizationId,
+                projectId: task.projectId,
+                detectorType: task.detectorType,
+                durationMs: Date.now() - queuedAt,
+                error: error instanceof Error ? error.message : 'Detector execution failed.',
+              }),
             );
           }
-        }
+        });
+
+        cursor = projects.at(-1)?.id;
+        if (projects.length < 100) break;
       }
+
+      this.lastCycleStatus = runsFailed > 0 ? 'partially_failed' : 'completed';
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.stack : String(error);
-      this.logger.error('Failed to schedule detection run', errorMsg);
+      this.lastCycleStatus = 'failed';
+      this.logger.error(
+        JSON.stringify({
+          event: 'detection_scheduler_cycle_failed',
+          error: error instanceof Error ? error.message : 'Unable to enumerate monitored projects.',
+        }),
+      );
+    } finally {
+      const finishedAt = new Date();
+      this.lastCycleFinishedAt = finishedAt;
+      this.logger.log(
+        JSON.stringify({
+          event: 'detection_scheduler_cycle_finished',
+          status: this.lastCycleStatus,
+          durationMs: finishedAt.getTime() - startedAt.getTime(),
+          projectsScanned,
+          runsStarted,
+          runsSkipped,
+          runsFailed,
+          findingsCreated,
+        }),
+      );
     }
   }
+}
 
-  /**
-   * Get detection configuration for debugging
-   */
-  getConfiguration(): {
-    enabled: boolean;
-    intervalMs: number;
-    lookbackMs: number;
-    detectorsConfig: string;
-    detectorsToRun: DetectorType[];
-  } {
-    return {
-      enabled: this.enabled,
-      intervalMs: this.intervalMs,
-      lookbackMs: this.lookbackMs,
-      detectorsConfig: this.detectorsConfig,
-      detectorsToRun: this.getDetectorsToRun(),
-    };
-  }
+async function forEachBounded<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.min(items.length, concurrency);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const item = items[nextIndex++];
+        await worker(item);
+      }
+    }),
+  );
 }

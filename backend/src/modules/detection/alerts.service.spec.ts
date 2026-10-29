@@ -97,6 +97,26 @@ describe('AlertsService idempotent finding alerts', () => {
     expect(createCall.data.issueKey).toBe('spend-spike:project-1:150');
   });
 
+  it('reports unchanged when repeated detection refreshes identical alert content', async () => {
+    const { service, tx, finding } = setup({ issueKey: 'stable-issue' });
+    tx.alert.findFirst.mockResolvedValue({
+      id: 'alert-existing',
+      findingId: finding.id,
+      title: finding.title,
+      message: finding.description,
+      severity: finding.severity,
+      evidence: finding.evidence,
+      estimatedRecoverableCost: null,
+      status: 'OPEN',
+    });
+
+    const outcome = await service.createAlertFromFinding('org-1', finding);
+
+    expect(outcome).toEqual({ alertId: 'alert-existing', action: 'unchanged' });
+    expect(tx.alert.update).not.toHaveBeenCalled();
+    expect(tx.alert.create).not.toHaveBeenCalled();
+  });
+
   it('treats resolved alerts as not found and creates new one', async () => {
     const { service, tx, finding } = setup();
 
