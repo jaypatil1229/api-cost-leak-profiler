@@ -17,10 +17,10 @@ import { useAlerts } from "@/components/dashboard/alerts-provider";
 import { useSession } from "@/components/auth/session-provider";
 import { apiRequest, queryString } from "@/lib/api/client";
 import { DetectionControl } from "@/components/detection/detection-control";
-import type { Alert, ApiKey, CostReport, DetectionsReport, DetectionRun, Finding, Member, OverviewReport, Page, Timeseries, UsageRecord, UsageReport, UsageSummary } from "@/lib/api/types";
+import type { Alert, ApiKey, CostReport, DetectionsReport, DetectionRun, DetectionSchedulerStatus, Finding, Member, OverviewReport, Page, Timeseries, UsageRecord, UsageReport, UsageSummary } from "@/lib/api/types";
 import { formatCurrency, formatDateTime, formatNumber, formatTokens } from "@/lib/formatters";
 import { useDateRange } from "@/components/shared/date-range-selector";
-import { FINDINGS_CREATED_DESCRIPTION, getDetectorScannedDescription } from "@/lib/detection/run-metrics";
+import { ALERT_ACTIONS_DESCRIPTION, FINDINGS_CREATED_DESCRIPTION, FINDINGS_MATCHED_DESCRIPTION, getDetectorScannedDescription } from "@/lib/detection/run-metrics";
 import type { AlertNotificationSeverity } from "@/lib/alerts/browser-notifications";
 import { DEFAULT_ALERT_LIST_FILTERS, parseAlertListFilters, serializeAlertListFilters, type AlertListFilters, type AlertSeverityFilter, type AlertSortBy, type AlertStatusFilter } from "@/lib/alerts/alert-list-state";
 
@@ -42,29 +42,65 @@ function WorkspaceRequired() {
 function DetectionRunHistory({ runs }: { runs: DetectionRun[] }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
-      <table className="w-full min-w-[760px] text-left text-sm">
+      <table className="w-full min-w-[1180px] text-left text-sm">
         <thead className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
           <tr>
-            <th className="p-3">Detector</th><th className="p-3">Status</th><th className="p-3">Window</th>
+            <th className="p-3">Detector / source</th><th className="p-3">Status</th><th className="p-3">Window</th>
             <th className="p-3" title="Detector-specific record or input count returned for this run.">Scanned</th>
-            <th className="p-3" title={FINDINGS_CREATED_DESCRIPTION}>New findings</th><th className="p-3">Failure</th>
+            <th className="p-3" title={FINDINGS_CREATED_DESCRIPTION}>New</th>
+            <th className="p-3" title={FINDINGS_MATCHED_DESCRIPTION}>Matched</th>
+            <th className="p-3" title={ALERT_ACTIONS_DESCRIPTION}>Alerts new</th>
+            <th className="p-3" title={ALERT_ACTIONS_DESCRIPTION}>Alerts updated</th><th className="p-3">Failure</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
           {runs.map((run) => (
             <tr key={run.id}>
-              <td className="p-3 align-top"><span className="font-medium">{run.detectorType}</span><p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">{getDetectorScannedDescription(run.detectorType)}</p></td>
-              <td className="p-3 align-top">{run.status}</td>
+              <td className="p-3 align-top"><span className="font-medium">{run.detectorType}</span><p className="mt-1 text-xs capitalize text-muted-foreground">{run.triggerSource}</p><p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">{getDetectorScannedDescription(run.detectorType)}</p></td>
+              <td className="p-3 align-top">{run.status === "PENDING" ? "QUEUED" : run.status}</td>
               <td className="p-3 align-top">{formatDateTime(run.windowStart)} – {formatDateTime(run.windowEnd)}</td>
               <td className="p-3 align-top" title={getDetectorScannedDescription(run.detectorType)}>{formatNumber(run.recordsScanned)}</td>
               <td className="p-3 align-top" title={FINDINGS_CREATED_DESCRIPTION}>{formatNumber(run.findingsCreated)}</td>
+              <td className="p-3 align-top" title={FINDINGS_MATCHED_DESCRIPTION}>{formatNumber(run.findingsMatched)}</td>
+              <td className="p-3 align-top" title={ALERT_ACTIONS_DESCRIPTION}>{formatNumber(run.alertsCreated)}</td>
+              <td className="p-3 align-top" title={ALERT_ACTIONS_DESCRIPTION}>{formatNumber(run.alertsUpdated)}</td>
               <td className="p-3 align-top">{run.error ?? "—"}</td>
             </tr>
           ))}
-          {!runs.length ? <tr><td colSpan={6} className="p-4 text-muted-foreground">No analysis runs.</td></tr> : null}
+          {!runs.length ? <tr><td colSpan={9} className="p-4 text-muted-foreground">No analysis runs.</td></tr> : null}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function DetectionSchedulerStatusCard({ status }: { status: DetectionSchedulerStatus }) {
+  const lastCompleted = status.lastSuccessfulRun?.completedAt ?? null;
+  return (
+    <section aria-labelledby="detection-scheduler-title" className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 id="detection-scheduler-title" className="font-semibold">Automatic monitoring</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {status.enabled
+              ? `${status.detectors.length} configured detectors run across active projects every ${formatNumber(Math.round(status.intervalMs / 1_000))} seconds.`
+              : "Automatic detection is disabled by deployment configuration."}
+          </p>
+        </div>
+        <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${status.enabled ? "border-primary/30 bg-primary/5 text-primary" : "border-border text-muted-foreground"}`}>
+          {status.enabled ? "Enabled" : "Disabled by deployment"}
+        </span>
+      </div>
+      <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
+        <div><dt className="text-xs text-muted-foreground">Next expected run</dt><dd className="mt-1 font-medium">{status.nextRunAt ? formatDateTime(status.nextRunAt) : "Not scheduled"}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Last successful detector run</dt><dd className="mt-1 font-medium">{lastCompleted ? formatDateTime(lastCompleted) : "No successful run yet"}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Last scheduled result</dt><dd className="mt-1 font-medium">{status.lastScheduledRun ? `${status.lastScheduledRun.detectorType} · ${status.lastScheduledRun.status === "PENDING" ? "QUEUED" : status.lastScheduledRun.status}` : "No scheduled run yet"}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Analysis window</dt><dd className="mt-1 font-medium">Last {formatNumber(Math.round(status.lookbackMs / 60_000))} minutes</dd></div>
+      </dl>
+      <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+        Scanned counts follow each detector’s query contract. A failed detector run stays marked failed and does not become a zero-finding success.
+      </p>
+    </section>
   );
 }
 
@@ -141,18 +177,21 @@ export function FindingsApiView() {
   const ready = Boolean(organization && project && !workspaceLoading && !workspaceError);
   const findings = useApiQuery<Page<Finding>>(ready ? `/organizations/${organization!.id}/detection/findings${queryString({ projectId: project!.id, page, limit: 25 })}` : null);
   const runs = useApiQuery<Page<DetectionRun>>(ready ? `/organizations/${organization!.id}/detection/runs${queryString({ projectId: project!.id, limit: 10 })}` : null);
+  const scheduler = useApiQuery<DetectionSchedulerStatus>(ready ? `/organizations/${organization!.id}/detection/scheduler${queryString({ projectId: project!.id })}` : null);
   const reloadFindings = findings.reload;
   const reloadRuns = runs.reload;
+  const reloadScheduler = scheduler.reload;
   React.useEffect(() => {
     if (!ready) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") {
         reloadFindings();
         reloadRuns();
+        reloadScheduler();
       }
     }, 15_000);
     return () => window.clearInterval(timer);
-  }, [ready, reloadFindings, reloadRuns]);
+  }, [ready, reloadFindings, reloadRuns, reloadScheduler]);
   async function setFindingStatus(id: string, status: string) {
     try { await apiRequest(`/organizations/${organization!.id}/detection/findings/${id}/status`, { method: "PATCH", body: { status } }); findings.reload(); toast.success("Finding updated"); }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : "Could not update finding"); }
@@ -160,12 +199,14 @@ export function FindingsApiView() {
   const handleRunComplete = React.useCallback(() => {
     reloadFindings();
     reloadRuns();
-  }, [reloadFindings, reloadRuns]);
+    reloadScheduler();
+  }, [reloadFindings, reloadRuns, reloadScheduler]);
 
-  return <><PageHeader title="Findings" description="Detection results and lifecycle state saved by the backend." actions={<DetectionControl buttonText="Run Analysis" buttonVariant="outline" buttonSize="sm" onRunComplete={handleRunComplete} />} />{!ready ? <WorkspaceRequired /> : <DataState loading={findings.loading || runs.loading} error={findings.error ?? runs.error} retry={() => { findings.reload(); runs.reload(); }}>
+  return <><PageHeader title="Findings" description="Detection results and lifecycle state saved by the backend." actions={<DetectionControl buttonText="Run Analysis" buttonVariant="outline" buttonSize="sm" onRunComplete={handleRunComplete} />} />{!ready ? <WorkspaceRequired /> : <DataState loading={findings.loading || runs.loading || scheduler.loading} error={findings.error ?? runs.error ?? scheduler.error} retry={() => { findings.reload(); runs.reload(); scheduler.reload(); }}>
+    {scheduler.data ? <DetectionSchedulerStatusCard status={scheduler.data} /> : null}
     {findings.data?.items.length ? <ul className="divide-y divide-border rounded-xl border border-border bg-card">{findings.data.items.map((finding) => <li key={finding.id} className="flex flex-wrap items-center justify-between gap-4 p-4"><div className="min-w-0"><Link className="font-medium underline-offset-4 hover:underline" href={`/findings/${finding.id}`}>{finding.title}</Link><p className="mt-1 text-xs text-muted-foreground">{finding.severity} · {finding.detectorType} · {finding.status} · {finding.estimatedRecoverableCost === null ? "Not quantified" : formatCurrency(Number(finding.estimatedRecoverableCost))}</p></div><div className="flex gap-2">{finding.status === "OPEN" ? <Button size="sm" variant="outline" onClick={() => void setFindingStatus(finding.id, "ACKNOWLEDGED")}>Acknowledge</Button> : null}{finding.status !== "RESOLVED" ? <Button size="sm" variant="outline" onClick={() => void setFindingStatus(finding.id, "RESOLVED")}>Resolve</Button> : null}</div></li>)}</ul> : <EmptyState title="No findings" description="No findings have been recorded for the selected project." />}
     <div className="flex items-center justify-between text-sm"><span>{formatNumber(findings.data?.pagination.totalItems ?? 0)} findings · {runs.data?.items.length ?? 0} recent runs</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={!findings.data?.pagination.hasPreviousPage} onClick={() => setPage((n) => n - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={!findings.data?.pagination.hasNextPage} onClick={() => setPage((n) => n + 1)}>Next</Button></div></div>
-    <SectionHeading title="Analysis runs" description="Scanned is the detector-specific number of records or inputs examined in the saved run window. New findings counts newly inserted finding rows; a run may match and refresh an existing finding without creating a new row. A finding can link multiple usage records, and alert deduplication is separate." />
+    <SectionHeading title="Analysis runs" description="Scheduled and manual runs share the same detector and persistence workflow. Scanned counts are detector-specific; the table separately reports new and matched findings, alert creates and meaningful updates, and failures." />
     <DetectionRunHistory runs={runs.data?.items ?? []} />
   </DataState>}</>;
 }

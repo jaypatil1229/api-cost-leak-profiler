@@ -3,11 +3,13 @@ import test from "node:test";
 
 import {
   alertNotificationHref,
+  claimBrowserAlertDelivery,
   collectNewAlertNotifications,
   DEFAULT_ALERT_NOTIFICATION_PREFERENCES,
   deliverBrowserAlertNotification,
   getBrowserNotificationCapability,
   parseAlertNotificationPreferences,
+  releaseBrowserAlertDeliveryClaim,
   type AlertNotificationCandidate,
 } from "./browser-notifications";
 
@@ -123,11 +125,26 @@ test("a permitted new alert creates one browser notification and click opens tha
     assert.equal(deliverBrowserAlertNotification(notification, factory, (href) => navigations.push(href), () => assert.fail("unexpected notification error")), true);
   }
   assert.equal(created.length, 1);
-  assert.equal(created[0].title, item.title);
+  assert.equal(created[0].title, "New high ACLP alert");
+  assert.equal(created[0].options.body, "A new alert is ready to review in ACLP.");
   assert.equal(created[0].options.tag, `aclp-alert-${item.id}`);
   created[0].click();
   assert.equal(created[0].isClosed(), true);
   assert.deepEqual(navigations, ["/alerts?highlight=alert-click"]);
+});
+
+test("notification delivery claims survive reload and can be released after display failure", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem(key: string) { return values.get(key) ?? null; },
+    setItem(key: string, value: string) { values.set(key, value); },
+  };
+
+  assert.equal(claimBrowserAlertDelivery(storage, "user-org-project", "alert-1", 100), true);
+  // A new component instance shares this storage and suppresses a duplicate.
+  assert.equal(claimBrowserAlertDelivery(storage, "user-org-project", "alert-1", 200), false);
+  releaseBrowserAlertDeliveryClaim(storage, "user-org-project", "alert-1");
+  assert.equal(claimBrowserAlertDelivery(storage, "user-org-project", "alert-1", 300), true);
 });
 
 test("notification delivery failures are surfaced", () => {

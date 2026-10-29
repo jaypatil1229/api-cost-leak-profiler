@@ -108,9 +108,7 @@ export function DetectionControl({
 
       onRunComplete?.(latestRun);
       if (latestRun.status === 'COMPLETED') {
-        const runSummary = latestRun.detectorType === 'SPEND_SPIKE'
-          ? `${latestRun.recordsScanned} cost-valued record(s) across the current and two preceding windows examined; ${latestRun.findingsCreated} new finding row(s) inserted.`
-          : `${latestRun.recordsScanned} detector-specific record(s) or input(s) examined; ${latestRun.findingsCreated} new finding row(s) inserted.`;
+        const runSummary = `${latestRun.recordsScanned} detector-specific record(s) or input(s) examined; ${latestRun.findingsCreated} new and ${latestRun.findingsMatched} matched finding(s); ${latestRun.alertsCreated} alert(s) created and ${latestRun.alertsUpdated} meaningfully updated.`;
         toast.success('Detection completed', {
           description: runSummary,
         });

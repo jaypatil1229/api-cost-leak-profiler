@@ -18,3 +18,9 @@ export function getDetectorScannedDescription(detectorType: string): string {
 
 export const FINDINGS_CREATED_DESCRIPTION =
   "New finding rows inserted by this run. Results matching an existing finding are refreshed and are not counted as newly created. One finding may link several usage records, and alert deduplication is a separate step.";
+
+export const FINDINGS_MATCHED_DESCRIPTION =
+  "Detector results matched an existing finding by its stable issue identity. The finding and its evidence links were refreshed without changing its lifecycle status.";
+
+export const ALERT_ACTIONS_DESCRIPTION =
+  "Alerts created counts new alert rows. Alerts updated counts existing open or acknowledged alerts whose linked finding or visible evidence changed. Unchanged deduplicated alerts do not increment either count.";

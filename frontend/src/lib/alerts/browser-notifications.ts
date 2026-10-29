@@ -47,6 +47,12 @@ const severityRank: Record<AlertNotificationSeverity, number> = {
 
 const severityValues = Object.keys(severityRank) as AlertNotificationSeverity[];
 const statusValues: AlertNotificationStatus[] = ["OPEN", "ACKNOWLEDGED"];
+const MAX_PERSISTED_DELIVERIES = 1_000;
+
+export interface AlertDeliveryStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
 
 export function parseAlertNotificationPreferences(
   stored: string | null,
@@ -98,6 +104,58 @@ export function collectNewAlertNotifications(
   return { seenIds: nextSeenIds, notifications };
 }
 
+/** Persist a browser notification claim so reloads do not repeat delivery. */
+export function claimBrowserAlertDelivery(
+  storage: AlertDeliveryStorage | null,
+  storageKey: string,
+  alertId: string,
+  deliveredAt = Date.now(),
+): boolean {
+  if (!storage) return true;
+  try {
+    let parsed: unknown;
+    try {
+      const stored = storage.getItem(storageKey);
+      parsed = stored ? JSON.parse(stored) : [];
+    } catch {
+      parsed = [];
+    }
+    const entries = Array.isArray(parsed) ? parsed.filter(isDeliveryEntry) : [];
+    if (entries.some((entry) => entry.id === alertId)) return false;
+    const next = entries.slice(-(MAX_PERSISTED_DELIVERIES - 1));
+    next.push({ id: alertId, deliveredAt });
+    storage.setItem(storageKey, JSON.stringify(next));
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+export function releaseBrowserAlertDeliveryClaim(
+  storage: AlertDeliveryStorage | null,
+  storageKey: string,
+  alertId: string,
+): void {
+  if (!storage) return;
+  try {
+    const stored = storage.getItem(storageKey);
+    const parsed: unknown = stored ? JSON.parse(stored) : [];
+    if (!Array.isArray(parsed)) return;
+    storage.setItem(
+      storageKey,
+      JSON.stringify(parsed.filter((entry) => !isDeliveryEntry(entry) || entry.id !== alertId)),
+    );
+  } catch {
+    // Storage is best-effort; same-tab notification handling remains active.
+  }
+}
+
+function isDeliveryEntry(value: unknown): value is { id: string; deliveredAt: number } {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as { id?: unknown; deliveredAt?: unknown };
+  return typeof entry.id === "string" && typeof entry.deliveredAt === "number" && Number.isFinite(entry.deliveredAt);
+}
+
 export function alertNotificationHref(alertId: string): string {
   return `/alerts?highlight=${encodeURIComponent(alertId)}`;
 }
@@ -119,8 +177,8 @@ export function deliverBrowserAlertNotification(
   onError: () => void,
 ): boolean {
   try {
-    const notification = createNotification(alert.title, {
-      body: `${alert.severity} · ${alert.message}`.slice(0, 180),
+    const notification = createNotification(`New ${alert.severity.toLowerCase()} ACLP alert`, {
+      body: "A new alert is ready to review in ACLP.",
       tag: `aclp-alert-${alert.id}`,
     });
     notification.onclick = () => {

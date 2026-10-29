@@ -136,14 +136,34 @@ export interface DetectionRun {
   detectorType: string;
   detectorVersion: string;
   status: string;
+  triggerSource: "manual" | "scheduled";
   windowStart: string;
   windowEnd: string;
   startedAt: string | null;
   completedAt: string | null;
   recordsScanned: number;
   findingsCreated: number;
+  findingsMatched: number;
+  alertsCreated: number;
+  alertsUpdated: number;
   error: string | null;
   createdAt: string;
+}
+
+export interface DetectionSchedulerStatus {
+  enabled: boolean;
+  intervalMs: number;
+  lookbackMs: number;
+  detectors: string[];
+  maxConcurrency: number;
+  timeoutMs: number;
+  nextRunAt: string | null;
+  lastCycleStartedAt: string | null;
+  lastCycleFinishedAt: string | null;
+  lastCycleStatus: string;
+  projectId: string;
+  lastScheduledRun: DetectionRun | null;
+  lastSuccessfulRun: DetectionRun | null;
 }
 
 export interface OverviewReport {

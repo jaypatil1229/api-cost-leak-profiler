@@ -8,10 +8,12 @@ import type { Alert, Page } from "@/lib/api/types";
 import { useWorkspace } from "@/components/dashboard/workspace-provider";
 import { useSession } from "@/components/auth/session-provider";
 import {
+  claimBrowserAlertDelivery,
   collectNewAlertNotifications,
   deliverBrowserAlertNotification,
   getBrowserNotificationCapability,
   parseAlertNotificationPreferences,
+  releaseBrowserAlertDeliveryClaim,
   type AlertNotificationPreferences,
   type AlertNotificationSeverity,
   type AlertNotificationStatus,
@@ -39,6 +41,7 @@ interface AlertsApi {
 
 const AlertsContext = React.createContext<AlertsApi | null>(null);
 const NOTIFICATION_PREFERENCE_PREFIX = "aclp.browser-alert-notifications.v1";
+const NOTIFICATION_DELIVERY_PREFIX = "aclp.browser-alert-deliveries.v1";
 const ALERT_PREFERENCES_CHANGED_EVENT = "aclp:alert-notification-preferences-changed";
 const BROWSER_PERMISSION_CHANGED_EVENT = "aclp:browser-notification-permission-changed";
 
@@ -141,7 +144,20 @@ export function AlertsProvider({ children }: { children: React.ReactNode }) {
     observed.current.seenIds = result.seenIds;
 
     if (!preferences.enabled || permission !== "granted") return;
+    const deliveryStorageKey = `${NOTIFICATION_DELIVERY_PREFIX}:${preferenceKey}`;
+    let deliveryStorage: Storage | null = null;
+    try {
+      deliveryStorage = window.localStorage;
+    } catch {
+      deliveryStorage = null;
+    }
     for (const alert of result.notifications) {
+      if (!claimBrowserAlertDelivery(deliveryStorage, deliveryStorageKey, alert.id)) continue;
+      const forgetClaim = () => {
+        releaseBrowserAlertDeliveryClaim(deliveryStorage, deliveryStorageKey, alert.id);
+        observed.current.seenIds.delete(alert.id);
+        setFeedback("A browser notification could not be displayed.");
+      };
       deliverBrowserAlertNotification(
         alert,
         (title, options) => new window.Notification(title, options),
@@ -149,7 +165,7 @@ export function AlertsProvider({ children }: { children: React.ReactNode }) {
           window.focus();
           window.location.assign(href);
         },
-        () => setFeedback("A browser notification could not be displayed."),
+        forgetClaim,
       );
     }
   }, [monitor.data, preferenceKey, preferences, permission]);
