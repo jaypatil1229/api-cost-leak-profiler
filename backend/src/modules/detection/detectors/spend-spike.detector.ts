@@ -95,7 +95,7 @@ export class SpendSpikeDetector implements Detector {
 
         findings.push({
           title: `Spend spike: ${SPIKE_THRESHOLD_MULTIPLIER}x+ increase over previous window`,
-          explanation: `Current window cost ($${toMoneyString(currentCost) ?? '0'}) exceeds baseline ($$${toMoneyString(baselineCost) ?? '0'} from ${baselineWindow} window) by more than ${SPIKE_THRESHOLD_MULTIPLIER}x (excess: $${toMoneyString(excess) ?? '0'}).`,
+          explanation: `Current window cost ($${toMoneyString(currentCost) ?? '0'}) exceeds baseline ($${toMoneyString(baselineCost) ?? '0'} from ${baselineWindow} window) by more than ${SPIKE_THRESHOLD_MULTIPLIER}x (excess: $${toMoneyString(excess) ?? '0'}).`,
           severity: Severity.HIGH,
           evidence: {
             currentCost: toMoneyString(currentCost),

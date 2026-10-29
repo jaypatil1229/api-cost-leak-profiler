@@ -551,6 +551,9 @@ model UsageRecord {
   /// SDK-supplied idempotency key. Unique per project.
   eventId String @db.VarChar(128)
 
+  /// Caller-supplied identity shared by attempts for one logical operation.
+  operationId String? @db.VarChar(128)
+
   /// Provider-side request id (e.g. OpenAI `x-request-id`), when the SDK has it.
   externalRequestId String? @db.VarChar(128)
 
@@ -622,6 +625,7 @@ model UsageRecord {
   @@index([projectId, featureId, occurredAt])
   @@index([projectId, customerUserId, occurredAt])
   @@index([projectId, sessionId, occurredAt])
+  @@index([projectId, operationId, occurredAt])
   @@index([projectId, promptHash, occurredAt])
   @@index([projectId, status, occurredAt])
   @@index([projectId, costStatus])

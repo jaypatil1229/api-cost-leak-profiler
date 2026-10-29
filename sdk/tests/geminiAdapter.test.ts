@@ -55,6 +55,27 @@ describe("observeGemini", () => {
     expect(ret.response.text()).toBe("Generated content");
   });
 
+  it("extracts a caller operation ID from each Gemini request", async () => {
+    const { mockModel } = makeMockGeminiModel();
+    const aclp = new AclpClient({
+      apiKey: "aclp_test_abc",
+      projectId: "proj-1",
+      flushIntervalMs: 60000,
+    });
+    observeGemini(mockModel, aclp, {
+      operationIdExtractor: (request: any) => request.operationId,
+    });
+    await mockModel.generateContent({ operationId: "job-1", contents: "one" });
+    await mockModel.generateContent({ operationId: "job-2", contents: "two" });
+    await mockModel.generateContent({ operationId: "job-1", contents: "retry" });
+    expect((aclp as any).queue.map((event: any) => event.operationId)).toEqual([
+      "job-1",
+      "job-2",
+      "job-1",
+    ]);
+    aclp.shutdown();
+  });
+
   it("accepts an existing AclpClient instance and records token details", async () => {
     const { mockModel } = makeMockGeminiModel();
     const aclp = new AclpClient({
@@ -63,7 +84,9 @@ describe("observeGemini", () => {
       flushIntervalMs: 60000,
     });
 
-    observeGemini(mockModel, aclp);
+    observeGemini(mockModel, aclp, {
+      operationIdExtractor: (request: any) => request.operationId,
+    });
 
     await mockModel.generateContent({
       contents: [{ parts: [{ text: "Explain general relativity." }] }],
@@ -89,17 +112,27 @@ describe("observeGemini", () => {
 
     const mockModel = {
       model: "gemini-1.5-pro",
-      generateContent: jest.fn().mockRejectedValue(new Error("RESOURCE_EXHAUSTED")),
+      generateContent: jest
+        .fn()
+        .mockRejectedValue(new Error("RESOURCE_EXHAUSTED")),
     };
 
-    observeGemini(mockModel, aclp);
+    observeGemini(mockModel, aclp, {
+      operationIdExtractor: (request: any) => request.operationId,
+    });
 
-    await expect(mockModel.generateContent("Hello")).rejects.toThrow("RESOURCE_EXHAUSTED");
+    await expect(
+      mockModel.generateContent({
+        operationId: "failed-job",
+        contents: "Hello",
+      }),
+    ).rejects.toThrow("RESOURCE_EXHAUSTED");
 
     expect(aclp.getQueueLength()).toBe(1);
     const event = (aclp as any).queue[0];
     expect(event.status).toBe("ERROR");
     expect(event.errorCode).toContain("RESOURCE_EXHAUSTED");
+    expect(event.operationId).toBe("failed-job");
     aclp.shutdown();
   });
 
@@ -113,7 +146,7 @@ describe("observeGemini", () => {
         metadataExtractor: () => {
           throw new Error("Extractor exploded");
         },
-      }
+      },
     );
 
     const ret = await mockModel.generateContent("Hello");
@@ -124,8 +157,8 @@ describe("observeGemini", () => {
     expect(() =>
       observeGemini(
         { notAGeminiModel: true },
-        { apiKey: "aclp_test_abc", projectId: "proj-1" }
-      )
+        { apiKey: "aclp_test_abc", projectId: "proj-1" },
+      ),
     ).toThrow("Provided model does not appear to be a Gemini GenerativeModel");
   });
 });

@@ -1,7 +1,7 @@
 // src/geminiAdapter.ts
 
 import { AclpClient } from "./client";
-import { AclpClientConfig, UsageEvent } from "./types";
+import { AclpClientConfig, OperationIdExtractor } from "./types";
 import { randomUUID } from "crypto";
 
 /**
@@ -14,8 +14,13 @@ export interface GeminiAdapterOptions {
   customerUserId?: string;
   /** Optional session identifier */
   sessionId?: string;
+  /** Extract the caller's stable logical-operation ID from each request. */
+  operationIdExtractor?: OperationIdExtractor;
   /** Optional function to extract custom metadata */
-  metadataExtractor?: (request: any, response: any) => Record<string, unknown> | undefined;
+  metadataExtractor?: (
+    request: any,
+    response: any,
+  ) => Record<string, unknown> | undefined;
 }
 
 /**
@@ -38,7 +43,9 @@ function extractGeminiPrompt(request: unknown): string {
         .flatMap((c: any) => {
           if (typeof c === "string") return [c];
           if (Array.isArray(c?.parts)) {
-            return c.parts.map((p: any) => (typeof p?.text === "string" ? p.text : ""));
+            return c.parts.map((p: any) =>
+              typeof p?.text === "string" ? p.text : "",
+            );
           }
           return [];
         })
@@ -59,7 +66,7 @@ function extractGeminiPrompt(request: unknown): string {
 export function observeGemini<T = any>(
   model: T,
   configOrAclp: AclpClient | AclpClientConfig,
-  opts: GeminiAdapterOptions = {}
+  opts: GeminiAdapterOptions = {},
 ): T {
   const aclp =
     configOrAclp instanceof AclpClient
@@ -69,7 +76,7 @@ export function observeGemini<T = any>(
   const target = model as any;
   if (!target || typeof target.generateContent !== "function") {
     throw new Error(
-      "Provided model does not appear to be a Gemini GenerativeModel with generateContent method"
+      "Provided model does not appear to be a Gemini GenerativeModel with generateContent method",
     );
   }
 
@@ -77,6 +84,19 @@ export function observeGemini<T = any>(
 
   target.generateContent = async function (request: any, ...rest: any[]) {
     const startTime = Date.now();
+    let operationId: string | undefined;
+    try {
+      const extracted = opts.operationIdExtractor?.(request);
+      if (extracted === undefined || (typeof extracted === "string" && extracted.trim().length > 0 && extracted.length <= 128)) {
+        operationId = extracted;
+      } else {
+        console.warn("[ACLP SDK] operationIdExtractor returned an invalid ID; recording without operationId.");
+      }
+    } catch (extractorErr) {
+      console.warn(
+        "[ACLP SDK] operationIdExtractor failed; recording without operationId.",
+      );
+    }
     let result: any;
     let caughtError: any = null;
 
@@ -101,17 +121,27 @@ export function observeGemini<T = any>(
           errorCode: (
             caughtError?.code ??
             caughtError?.status ??
-            (caughtError?.name && caughtError.name !== "Error" ? caughtError.name : undefined) ??
-            (caughtError?.message ? String(caughtError.message).slice(0, 32) : "GEMINI_ERROR")
-          ).toString().slice(0, 64),
+            (caughtError?.name && caughtError.name !== "Error"
+              ? caughtError.name
+              : undefined) ??
+            (caughtError?.message
+              ? String(caughtError.message).slice(0, 32)
+              : "GEMINI_ERROR")
+          )
+            .toString()
+            .slice(0, 64),
           featureId: opts.featureId,
           customerUserId: opts.customerUserId,
           sessionId: opts.sessionId,
+          operationId,
           promptHash: AclpClient.hashPrompt(promptText),
           promptCharCount: promptText.length,
         });
       } catch (telemetryErr) {
-        console.error("[ACLP SDK] Failed to record Gemini error telemetry:", telemetryErr);
+        console.error(
+          "[ACLP SDK] Failed to record Gemini error telemetry:",
+          telemetryErr,
+        );
       }
       throw err;
     }
@@ -123,9 +153,18 @@ export function observeGemini<T = any>(
       const promptHash = AclpClient.hashPrompt(promptText);
 
       const usageMeta = result?.response?.usageMetadata ?? {};
-      const inputTokens = typeof usageMeta.promptTokenCount === "number" ? usageMeta.promptTokenCount : 0;
-      const outputTokens = typeof usageMeta.candidatesTokenCount === "number" ? usageMeta.candidatesTokenCount : 0;
-      const cachedTokens = typeof usageMeta.cachedContentTokenCount === "number" ? usageMeta.cachedContentTokenCount : undefined;
+      const inputTokens =
+        typeof usageMeta.promptTokenCount === "number"
+          ? usageMeta.promptTokenCount
+          : 0;
+      const outputTokens =
+        typeof usageMeta.candidatesTokenCount === "number"
+          ? usageMeta.candidatesTokenCount
+          : 0;
+      const cachedTokens =
+        typeof usageMeta.cachedContentTokenCount === "number"
+          ? usageMeta.cachedContentTokenCount
+          : undefined;
 
       let customMeta: Record<string, unknown> | undefined;
       if (typeof opts.metadataExtractor === "function") {
@@ -149,12 +188,16 @@ export function observeGemini<T = any>(
         featureId: opts.featureId,
         customerUserId: opts.customerUserId,
         sessionId: opts.sessionId,
+        operationId,
         promptHash,
         promptCharCount: promptText.length,
         metadata: customMeta as any,
       });
     } catch (telemetryErr) {
-      console.error("[ACLP SDK] Failed to record Gemini telemetry:", telemetryErr);
+      console.error(
+        "[ACLP SDK] Failed to record Gemini telemetry:",
+        telemetryErr,
+      );
     }
 
     return result;

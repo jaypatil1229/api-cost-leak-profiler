@@ -5,11 +5,12 @@ import { spawnSync } from 'node:child_process';
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.resolve(scriptDirectory, '..');
 const preloadPath = path.join(scriptDirectory, 'test-runtime-preload.cjs');
-const preloadOption = `--require=${preloadPath.replace(/\\/g, '/')}`;
+const preloadOption = `--require="${preloadPath.replace(/\\/g, '/')}"`;
 const nodeOptions = [process.env.NODE_OPTIONS, preloadOption].filter(Boolean).join(' ');
 const testFiles = [
   'src/lib/mock-services/repository.test.ts',
   'src/lib/api/client.test.ts',
+  'src/lib/api/detection-run-polling.test.ts',
   ...process.argv.slice(2),
 ];
 

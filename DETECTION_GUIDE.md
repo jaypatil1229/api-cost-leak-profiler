@@ -8,7 +8,7 @@ The detection system identifies potential cost leaks in your LLM API usage throu
 
 ### Deterministic Detectors (Fast, No External Dependencies)
 - **DUPLICATE_PROMPT**: Identifies repeated identical prompts
-- **RETRY_LOOP**: Detects rapid repeated calls
+- **RETRY_LOOP**: Detects repeated failed attempts for one caller-supplied logical operation ID
 - **UNBOUNDED_CONTEXT**: Finds growing conversation sizes
 - **OVERSIZED_PROMPT**: Flags prompts exceeding size limits
 - **SPEND_SPIKE**: Detects unusual cost increases
@@ -33,6 +33,10 @@ The detection system identifies potential cost leaks in your LLM API usage throu
 **Root Cause**: The `ANALYTICS_SERVICE_URL` and `ANALYTICS_SERVICE_TOKEN` are not configured in `backend/.env` and `analytics/.env`.
 
 ## Manual Detection
+
+### Retry-loop evidence
+
+Retry-loop detection groups usage events by the same non-empty `operationId` within the selected organization, project, and time window. It requires at least five observed attempts, at least two `ERROR`, `TIMEOUT`, or `RATE_LIMITED` outcomes, and an inclusive maximum gap of 2 seconds between adjacent attempts. A terminal `SUCCESS` marks recovery. `UNKNOWN` and `CANCELLED` outcomes do not establish retry evidence, and events without an operation ID are ignored. Supply one stable ID across all attempts and a distinct ID for each independent logical operation. The SDK adapters can extract it from caller request context using `operationIdExtractor`; provider SDK internal retries remain a single outer-call event.
 
 ### Via API (Recommended)
 

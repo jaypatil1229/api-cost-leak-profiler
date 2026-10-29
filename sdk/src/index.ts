@@ -6,6 +6,7 @@ export type {
   UsageEvent,
   Provider,
   EventStatus,
+  OperationIdExtractor,
 } from "./types";
 export { observeOpenAI, OpenAIAdapterOptions } from "./openaiAdapter";
 export { observeGemini, GeminiAdapterOptions } from "./geminiAdapter";

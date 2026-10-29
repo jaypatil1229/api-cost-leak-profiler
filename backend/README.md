@@ -409,7 +409,7 @@ ACLP includes 7 built-in detectors:
 
 ### Deterministic (run via Node)
 1. **duplicate-prompt** — Identical prompts sent multiple times (LOW severity)
-2. **retry-loop** — Rapid successive calls in same session (MEDIUM)
+2. **retry-loop** — At least five attempts sharing a caller-supplied operation ID, with at least two failures and no more than 2 seconds between adjacent observed attempts (MEDIUM). A final success is reported as recovery. Events without operation IDs are excluded; session and model similarity do not establish a retry.
 3. **unbounded-context** — Monotonically growing context window (HIGH if >100k tokens)
 4. **oversized-prompt** — Single call exceeding 50k input / 16k output tokens (MEDIUM/HIGH)
 5. **spend-spike** — 3x cost increase vs. previous period (HIGH)

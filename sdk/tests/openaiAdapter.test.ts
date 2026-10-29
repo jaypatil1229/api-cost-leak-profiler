@@ -60,6 +60,39 @@ describe("observeOpenAI", () => {
     expect(result.id).toBe("chatcmpl-test123");
   });
 
+  it("extracts a caller operation ID from each request and preserves it in telemetry", async () => {
+    const { mockClient } = makeMockOpenAI();
+    const aclp = new AclpClient({
+      apiKey: "aclp_test_abc",
+      projectId: "proj-1",
+      flushIntervalMs: 60000,
+    });
+    observeOpenAI(mockClient, aclp, {
+      operationIdExtractor: (request: any) => request.operationId,
+    });
+    await mockClient.chat.completions.create({
+      model: "gpt-4o",
+      operationId: "order-1",
+      messages: [],
+    });
+    await mockClient.chat.completions.create({
+      model: "gpt-4o",
+      operationId: "order-2",
+      messages: [],
+    });
+    await mockClient.chat.completions.create({
+      model: "gpt-4o",
+      operationId: "order-1",
+      messages: [],
+    });
+    expect((aclp as any).queue.map((event: any) => event.operationId)).toEqual([
+      "order-1",
+      "order-2",
+      "order-1",
+    ]);
+    aclp.shutdown();
+  });
+
   it("accepts an existing AclpClient instance", async () => {
     const { mockClient, postMock } = makeMockOpenAI();
     const aclp = new AclpClient({
@@ -68,7 +101,9 @@ describe("observeOpenAI", () => {
       flushIntervalMs: 60000,
     });
 
-    observeOpenAI(mockClient, aclp);
+    observeOpenAI(mockClient, aclp, {
+      operationIdExtractor: (request: any) => request.operationId,
+    });
 
     await mockClient.chat.completions.create({
       model: "gpt-4o",
@@ -96,18 +131,22 @@ describe("observeOpenAI", () => {
       },
     };
 
-    observeOpenAI(mockClient, aclp);
+    observeOpenAI(mockClient, aclp, {
+      operationIdExtractor: (request: any) => request.operationId,
+    });
 
     await expect(
       mockClient.chat.completions.create({
         model: "gpt-4o",
+        operationId: "failed-order",
         messages: [{ role: "user", content: "Hello" }],
-      })
+      }),
     ).rejects.toThrow("rate_limit_exceeded");
 
     expect(aclp.getQueueLength()).toBe(1);
     const event = (aclp as any).queue[0];
     expect(event.status).toBe("ERROR");
+    expect(event.operationId).toBe("failed-order");
     aclp.shutdown();
   });
 
@@ -121,7 +160,7 @@ describe("observeOpenAI", () => {
         metadataExtractor: () => {
           throw new Error("Extractor exploded");
         },
-      }
+      },
     );
 
     // Call must succeed normally despite metadataExtractor crashing
@@ -141,7 +180,11 @@ describe("observeOpenAI", () => {
     });
 
     async function* fakeStream() {
-      yield { id: "stream-1", model: "gpt-4o", choices: [{ delta: { content: "A" } }] };
+      yield {
+        id: "stream-1",
+        model: "gpt-4o",
+        choices: [{ delta: { content: "A" } }],
+      };
       yield {
         id: "stream-1",
         model: "gpt-4o",
@@ -185,8 +228,8 @@ describe("observeOpenAI", () => {
     expect(() =>
       observeOpenAI(
         { notAnOpenAIClient: true },
-        { apiKey: "aclp_test_abc", projectId: "proj-1" }
-      )
+        { apiKey: "aclp_test_abc", projectId: "proj-1" },
+      ),
     ).toThrow("Provided client does not appear to be an OpenAI Chat client");
   });
 });

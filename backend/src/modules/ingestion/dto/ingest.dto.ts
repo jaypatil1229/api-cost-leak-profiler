@@ -6,6 +6,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsOptional,
+  Matches,
   IsString,
   MaxLength,
   Min,
@@ -85,6 +86,17 @@ export class IngestUsageEventDto {
   @IsString()
   @MaxLength(128)
   externalRequestId?: string | null;
+
+  @ApiPropertyOptional({
+    maxLength: 128,
+    nullable: true,
+    description: 'Caller-supplied ID shared by attempts of the same logical operation.',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/\S/, { message: 'operationId must not be blank.' })
+  @MaxLength(128)
+  operationId?: string | null;
 
   @ApiPropertyOptional({ maxLength: 128, nullable: true })
   @IsOptional()

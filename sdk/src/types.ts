@@ -2,7 +2,9 @@
 
 export type Provider = "OPENAI" | "GEMINI";
 
-export type EventStatus = "SUCCESS" | "ERROR" | "TIMEOUT";
+export type EventStatus =
+  "SUCCESS" | "ERROR" | "TIMEOUT" | "RATE_LIMITED" | "CANCELLED" | "UNKNOWN";
+export type OperationIdExtractor = (request: unknown) => string | undefined;
 
 export interface UsageEvent {
   /** Unique identifier for the event, max 128 chars */
@@ -28,6 +30,8 @@ export interface UsageEvent {
   errorCode?: string;
   /** External request identifier (e.g., OpenAI request ID) */
   externalRequestId?: string;
+  /** Caller-supplied logical operation ID, reused for all attempts */
+  operationId?: string;
   /** Optional feature identifier for grouping */
   featureId?: string;
   /** Optional customer user identifier */

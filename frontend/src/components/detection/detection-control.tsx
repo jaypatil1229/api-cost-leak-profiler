@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { PlayIcon } from "lucide-react";
 import { useWorkspace } from "@/components/dashboard/workspace-provider";
 import { apiRequest } from "@/lib/api/client";
+import { pollDetectionRun } from "@/lib/api/detection-run-polling";
 import type { DetectionRun } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -88,11 +89,37 @@ export function DetectionControl({
         }
       );
 
-      toast.success(`Detection started`, {
-        description: `Running ${DETECTOR_OPTIONS.find(d => d.value === detectorType)?.label ?? detectorType}...`,
+      const detectorLabel = DETECTOR_OPTIONS.find((item) => item.value === detectorType)?.label ?? detectorType;
+      toast.success('Detection started', {
+        description: `Running ${detectorLabel}...`,
       });
 
-      onRunComplete?.(run);
+      let latestRun = run;
+      try {
+        latestRun = await pollDetectionRun(
+          () => apiRequest<DetectionRun>(
+            `/organizations/${organizationId}/detection/runs/${run.id}`,
+          ),
+        );
+      } catch (cause) {
+        const error = cause instanceof Error ? cause.message : 'Unable to check detection status.';
+        toast.error('Could not check detection status', { description: error });
+      }
+
+      onRunComplete?.(latestRun);
+      if (latestRun.status === 'COMPLETED') {
+        toast.success('Detection completed', {
+          description: `${latestRun.findingsCreated} finding(s) recorded.`,
+        });
+      } else if (latestRun.status === 'FAILED') {
+        toast.error('Detection run failed', {
+          description: latestRun.error ?? 'The backend could not complete this run.',
+        });
+      } else {
+        toast('Detection is still running', {
+          description: 'The latest run state is visible in the analysis runs list.',
+        });
+      }
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : "Unable to start detection";
       toast.error(`Detection failed`, {

@@ -1,17 +1,33 @@
 import { Injectable } from '@nestjs/common';
-import { DetectorKind, DetectorType, Severity } from '@prisma/client';
+import { CallStatus, DetectorKind, DetectorType, Severity } from '@prisma/client';
+import { createHash } from 'node:crypto';
 
 import { PrismaService } from '../../../database/prisma.service';
 
 import type { Detector, DetectorResult, DetectorRunContext } from './detector.interface';
 
+const MAX_ATTEMPT_GAP_MS = 2_000;
+const MIN_ATTEMPTS = 5;
+const MIN_FAILURES = 2;
+const RETRY_STATUSES = new Set<CallStatus>([
+  CallStatus.SUCCESS,
+  CallStatus.ERROR,
+  CallStatus.TIMEOUT,
+  CallStatus.RATE_LIMITED,
+]);
+const FAILURE_STATUSES = new Set<CallStatus>([
+  CallStatus.ERROR,
+  CallStatus.TIMEOUT,
+  CallStatus.RATE_LIMITED,
+]);
+
 @Injectable()
 export class RetryLoopDetector implements Detector {
   readonly type = DetectorType.RETRY_LOOP;
   readonly kind = DetectorKind.DETERMINISTIC;
-  readonly version = '1.0.0';
+  readonly version = '2.0.0';
   readonly description =
-    'Detects rapid-fire repeated API calls to the same model from the same session/feature, suggesting an uncontrolled retry loop.';
+    'Flags repeated failed attempts linked by a caller-supplied logical operation ID.';
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -21,82 +37,93 @@ export class RetryLoopDetector implements Detector {
         organizationId: context.organizationId,
         projectId: context.projectId,
         occurredAt: { gte: context.windowStart, lt: context.windowEnd },
-        sessionId: { not: null }, // Only consider records with session IDs
+        operationId: { not: null },
       },
-      select: { id: true, sessionId: true, model: true, occurredAt: true, status: true },
-      orderBy: { occurredAt: 'asc' },
+      select: { id: true, eventId: true, operationId: true, occurredAt: true, status: true },
+      orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
     });
 
-    // Group records by session ID and model combination
-    const bySession = new Map<string, typeof records>();
-    for (const r of records) {
-      if (!r.sessionId) continue;
-      const key = `${r.sessionId}:${r.model}`;
-      const group = bySession.get(key) ?? [];
-      group.push(r);
-      bySession.set(key, group);
+    // Defensive deduplication keeps mocked or otherwise duplicated query rows from
+    // inflating attempt counts. Ingest itself is idempotent on project + eventId.
+    const unique = new Map<string, (typeof records)[number]>();
+    for (const record of records) {
+      const key = record.eventId || record.id;
+      if (!unique.has(key)) unique.set(key, record);
     }
 
-    const RAPID_THRESHOLD_MS = 2000;
-    const MIN_RAPID_SEQUENCE = 5;
+    const eligible = [...unique.values()]
+      .filter((record) => record.operationId?.trim() && RETRY_STATUSES.has(record.status))
+      .sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || a.id.localeCompare(b.id));
+
+    const byOperation = new Map<string, typeof eligible>();
+    for (const record of eligible) {
+      const operationId = record.operationId!.trim();
+      const group = byOperation.get(operationId) ?? [];
+      group.push(record);
+      byOperation.set(operationId, group);
+    }
+
     const findings: DetectorResult['findings'] = [];
-
-    for (const [key, group] of bySession) {
-      if (group.length < MIN_RAPID_SEQUENCE) continue;
-
-      // Find all rapid sequences within the group
-      let sequenceStart = 0;
-      for (let i = 1; i < group.length; i++) {
-        const gap = group[i].occurredAt.getTime() - group[i - 1].occurredAt.getTime();
-        if (gap > RAPID_THRESHOLD_MS) {
-          // Check if we just ended a valid rapid sequence before the gap
-          const seqLen = i - sequenceStart;
-          if (seqLen >= MIN_RAPID_SEQUENCE) {
-            const ids = group.slice(sequenceStart, i).map((r) => r.id);
-            findings.push({
-              title: `Possible retry loop on ${key}`,
-              explanation: `${seqLen} rapid calls (< ${RAPID_THRESHOLD_MS}ms apart) detected for session/model key "${key}". May indicate an uncontrolled retry loop.`,
-              severity: Severity.MEDIUM,
-              evidence: {
-                sessionModelKey: key,
-                rapidCallCount: seqLen,
-                windowStart: group[sequenceStart].occurredAt.toISOString(),
-                windowEnd: group[i - 1].occurredAt.toISOString(),
-                errorCount: group.slice(sequenceStart, i).filter(r => r.status !== 'SUCCESS').length,
-              },
-              estimatedRecoverableCost: null,
-              fingerprint: `retry-loop:${context.projectId}:${key}:${sequenceStart}-${i}`,
-              issueKey: `retry-loop:${context.projectId}:${key}:${sequenceStart}-${i}`,
-              usageRecordIds: ids.map((id, j) => ({ id, role: j === 0 ? 'primary' : 'retry' })),
-            });
+    for (const [operationId, group] of byOperation) {
+      let sequence: typeof group = [];
+      const flush = () => {
+        if (sequence.length >= MIN_ATTEMPTS) {
+          const failedAttemptCount = sequence.filter((r) => FAILURE_STATUSES.has(r.status)).length;
+          if (failedAttemptCount >= MIN_FAILURES) {
+            findings.push(
+              this.toFinding(context.projectId, operationId, sequence, failedAttemptCount),
+            );
           }
-          sequenceStart = i;
         }
-      }
+        sequence = [];
+      };
 
-      // Handle sequence that extends to the end of the group
-      const seqLen = group.length - sequenceStart;
-      if (seqLen >= MIN_RAPID_SEQUENCE) {
-        const ids = group.slice(sequenceStart).map((r) => r.id);
-        findings.push({
-          title: `Possible retry loop on ${key}`,
-          explanation: `${seqLen} rapid calls (< ${RAPID_THRESHOLD_MS}ms apart) detected for session/model key "${key}". May indicate an uncontrolled retry loop.`,
-          severity: Severity.MEDIUM,
-          evidence: {
-            sessionModelKey: key,
-            rapidCallCount: seqLen,
-            windowStart: group[sequenceStart].occurredAt.toISOString(),
-            windowEnd: group[group.length - 1].occurredAt.toISOString(),
-            errorCount: group.slice(sequenceStart).filter(r => r.status !== 'SUCCESS').length,
-          },
-          estimatedRecoverableCost: null,
-          fingerprint: `retry-loop:${context.projectId}:${key}:${sequenceStart}-${group.length}`,
-          issueKey: `retry-loop:${context.projectId}:${key}:${sequenceStart}-${group.length}`,
-          usageRecordIds: ids.map((id, j) => ({ id, role: j === 0 ? 'primary' : 'retry' })),
-        });
+      for (const record of group) {
+        const previous = sequence.at(-1);
+        if (
+          previous &&
+          record.occurredAt.getTime() - previous.occurredAt.getTime() > MAX_ATTEMPT_GAP_MS
+        ) {
+          flush();
+        }
+        sequence.push(record);
       }
+      flush();
     }
 
-    return { recordsScanned: records.length, findings };
+    return { recordsScanned: unique.size, findings };
+  }
+
+  private toFinding(
+    projectId: string,
+    operationId: string,
+    sequence: Array<{ id: string; occurredAt: Date; status: CallStatus }>,
+    failedAttemptCount: number,
+  ): DetectorResult['findings'][number] {
+    const recovered = sequence.at(-1)?.status === CallStatus.SUCCESS;
+    const digest = createHash('sha256').update(operationId).digest('hex').slice(0, 24);
+    const issueKey = `retry-loop:${projectId}:${digest}`;
+    return {
+      title: `Repeated failed attempts for operation ${operationId}`,
+      explanation: `${failedAttemptCount} of ${sequence.length} attempts failed within a 2-second gap window for the same logical operation.${recovered ? ' The operation later succeeded.' : ' No successful recovery was recorded.'}`,
+      severity: Severity.MEDIUM,
+      evidence: {
+        operationId,
+        attemptCount: sequence.length,
+        failedAttemptCount,
+        recovered,
+        windowStart: sequence[0].occurredAt.toISOString(),
+        windowEnd: sequence.at(-1)!.occurredAt.toISOString(),
+        statuses: sequence.map((r) => r.status),
+        maxInterAttemptGapMs: MAX_ATTEMPT_GAP_MS,
+      },
+      estimatedRecoverableCost: null,
+      fingerprint: issueKey,
+      issueKey,
+      usageRecordIds: sequence.map((record, index) => ({
+        id: record.id,
+        role: index === 0 ? 'primary' : record.status === CallStatus.SUCCESS ? 'recovery' : 'retry',
+      })),
+    };
   }
 }

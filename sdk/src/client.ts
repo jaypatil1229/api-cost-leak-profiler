@@ -23,7 +23,10 @@ export class AclpClient {
     if (typeof cfg.apiKey !== "string" || cfg.apiKey.trim().length === 0) {
       throw new Error("ACLP SDK requires an apiKey.");
     }
-    if (typeof cfg.projectId !== "string" || cfg.projectId.trim().length === 0) {
+    if (
+      typeof cfg.projectId !== "string" ||
+      cfg.projectId.trim().length === 0
+    ) {
       throw new Error("ACLP SDK requires a projectId.");
     }
 
@@ -83,30 +86,72 @@ export class AclpClient {
       throw new Error("model is required");
     }
 
-    const inputTokens = this.validateCount("inputTokens", event.inputTokens ?? 0);
-    const outputTokens = this.validateCount("outputTokens", event.outputTokens ?? 0);
-    const cachedInputTokens = event.cachedInputTokens != null
-      ? this.validateCount("cachedInputTokens", event.cachedInputTokens)
-      : undefined;
+    const inputTokens = this.validateCount(
+      "inputTokens",
+      event.inputTokens ?? 0,
+    );
+    const outputTokens = this.validateCount(
+      "outputTokens",
+      event.outputTokens ?? 0,
+    );
+    const cachedInputTokens =
+      event.cachedInputTokens != null
+        ? this.validateCount("cachedInputTokens", event.cachedInputTokens)
+        : undefined;
     if (cachedInputTokens != null && cachedInputTokens > inputTokens) {
       throw new Error("cachedInputTokens cannot exceed inputTokens.");
     }
-    const totalTokens = this.validateCount("totalTokens", event.totalTokens ?? inputTokens + outputTokens);
+    const totalTokens = this.validateCount(
+      "totalTokens",
+      event.totalTokens ?? inputTokens + outputTokens,
+    );
     const occurredAt = event.occurredAt ?? new Date().toISOString();
-    if (typeof occurredAt !== "string" || !Number.isFinite(Date.parse(occurredAt))) {
+    if (
+      typeof occurredAt !== "string" ||
+      !Number.isFinite(Date.parse(occurredAt))
+    ) {
       throw new Error("occurredAt must be a valid ISO 8601 timestamp.");
     }
     const eventId = event.eventId ?? randomUUID();
-    if (typeof eventId !== "string" || eventId.trim().length === 0 || eventId.length > 128) {
-      throw new Error("eventId must be a non-empty string of at most 128 characters.");
+    if (
+      typeof eventId !== "string" ||
+      eventId.trim().length === 0 ||
+      eventId.length > 128
+    ) {
+      throw new Error(
+        "eventId must be a non-empty string of at most 128 characters.",
+      );
     }
-    if (model.length > 120) throw new Error("model must be at most 120 characters.");
-    if (event.status != null && !["SUCCESS", "ERROR", "TIMEOUT"].includes(event.status)) {
-      throw new Error("status must be SUCCESS, ERROR, or TIMEOUT.");
+    if (
+      event.operationId != null &&
+      (typeof event.operationId !== "string" ||
+        event.operationId.trim().length === 0 ||
+        event.operationId.length > 128)
+    ) {
+      throw new Error(
+        "operationId must be a non-empty string of at most 128 characters.",
+      );
+    }
+    if (model.length > 120)
+      throw new Error("model must be at most 120 characters.");
+    if (
+      event.status != null &&
+      ![
+        "SUCCESS",
+        "ERROR",
+        "TIMEOUT",
+        "RATE_LIMITED",
+        "CANCELLED",
+        "UNKNOWN",
+      ].includes(event.status)
+    ) {
+      throw new Error(
+        "status must be SUCCESS, ERROR, TIMEOUT, RATE_LIMITED, CANCELLED, or UNKNOWN.",
+      );
     }
 
     const sanitizedMeta = sanitizeMetadata(
-      event.metadata as Record<string, unknown> | undefined
+      event.metadata as Record<string, unknown> | undefined,
     );
 
     const full: UsageEvent = {
@@ -123,10 +168,13 @@ export class AclpClient {
           ? this.validateCount("latencyMs", event.latencyMs)
           : undefined,
       status: event.status ?? "SUCCESS",
-      errorCode: event.errorCode ? String(event.errorCode).slice(0, 64) : undefined,
+      errorCode: event.errorCode
+        ? String(event.errorCode).slice(0, 64)
+        : undefined,
       externalRequestId: event.externalRequestId
         ? String(event.externalRequestId).slice(0, 128)
         : undefined,
+      operationId: event.operationId ?? undefined,
       featureId: event.featureId
         ? String(event.featureId).slice(0, 128)
         : undefined,
@@ -155,7 +203,7 @@ export class AclpClient {
       this.queue.shift(); // Drop oldest to prevent memory exhaustion
       if (!this.hasWarnedQueueFull) {
         console.warn(
-          `[ACLP SDK] In-memory queue reached maximum capacity (${this.config.maxQueueSize}). Dropping oldest events.`
+          `[ACLP SDK] In-memory queue reached maximum capacity (${this.config.maxQueueSize}). Dropping oldest events.`,
         );
         this.hasWarnedQueueFull = true;
       }
@@ -188,11 +236,16 @@ export class AclpClient {
           if (batch.length === 0) break;
           const delivered = await this.sendBatchWithRetry(batch);
           if (!delivered) {
-            const room = Math.max(0, this.config.maxQueueSize - this.queue.length);
+            const room = Math.max(
+              0,
+              this.config.maxQueueSize - this.queue.length,
+            );
             const retained = room === 0 ? [] : batch.slice(-room);
             this.queue.unshift(...retained);
             if (retained.length < batch.length) {
-              console.warn(`[ACLP SDK] Queue is full after delivery failure; dropped ${batch.length - retained.length} event(s).`);
+              console.warn(
+                `[ACLP SDK] Queue is full after delivery failure; dropped ${batch.length - retained.length} event(s).`,
+              );
             }
             break;
           }
@@ -229,7 +282,10 @@ export class AclpClient {
   private startTimer(): void {
     this.timer = setInterval(() => {
       this.flush().catch((e) => {
-        console.error("[ACLP SDK] Periodic batch flush error:", e?.message ?? e);
+        console.error(
+          "[ACLP SDK] Periodic batch flush error:",
+          e?.message ?? e,
+        );
       });
     }, this.config.flushIntervalMs);
 
@@ -260,7 +316,7 @@ export class AclpClient {
         if (status && status >= 400 && status < 500 && status !== 429) {
           console.warn(
             `[ACLP SDK] Dropping batch of ${events.length} event(s) due to client error (${status}):`,
-            err?.response?.data?.error?.message ?? err?.message
+            err?.response?.data?.error?.message ?? err?.message,
           );
           return true;
         }
@@ -269,9 +325,12 @@ export class AclpClient {
         if (status === 429) {
           const retryAfterSec = parseInt(
             err.response.headers?.["retry-after"] ?? "1",
-            10
+            10,
           );
-          const delayMs = Math.min(60000, Math.max(1, isNaN(retryAfterSec) ? 1 : retryAfterSec) * 1000);
+          const delayMs = Math.min(
+            60000,
+            Math.max(1, isNaN(retryAfterSec) ? 1 : retryAfterSec) * 1000,
+          );
           await delay(delayMs);
         } else {
           // 5xx server errors or transient network failures -> exponential backoff
@@ -282,7 +341,7 @@ export class AclpClient {
         if (attempt >= maxAttempts) {
           console.error(
             `[ACLP SDK] Discarding batch of ${events.length} event(s) after ${maxAttempts} failed attempts:`,
-            err?.message ?? "network or server error"
+            err?.message ?? "network or server error",
           );
           return false;
         }

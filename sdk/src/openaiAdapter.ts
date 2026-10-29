@@ -1,7 +1,7 @@
 // src/openaiAdapter.ts
 
 import { AclpClient } from "./client";
-import { AclpClientConfig, UsageEvent } from "./types";
+import { AclpClientConfig, OperationIdExtractor } from "./types";
 import { randomUUID } from "crypto";
 
 /**
@@ -14,8 +14,13 @@ export interface OpenAIAdapterOptions {
   customerUserId?: string;
   /** Optional session identifier */
   sessionId?: string;
+  /** Extract the caller's stable logical-operation ID from each request. */
+  operationIdExtractor?: OperationIdExtractor;
   /** Optional function to extract custom metadata from the request/response */
-  metadataExtractor?: (request: any, response: any) => Record<string, unknown> | undefined;
+  metadataExtractor?: (
+    request: any,
+    response: any,
+  ) => Record<string, unknown> | undefined;
 }
 
 /**
@@ -50,7 +55,7 @@ function extractPromptText(messages: unknown): string {
 export function observeOpenAI<T = any>(
   client: T,
   configOrAclp: AclpClient | AclpClientConfig,
-  opts: OpenAIAdapterOptions = {}
+  opts: OpenAIAdapterOptions = {},
 ): T {
   const aclp =
     configOrAclp instanceof AclpClient
@@ -63,15 +68,33 @@ export function observeOpenAI<T = any>(
     typeof target.chat.completions.create !== "function"
   ) {
     throw new Error(
-      "Provided client does not appear to be an OpenAI Chat client with chat.completions.create method"
+      "Provided client does not appear to be an OpenAI Chat client with chat.completions.create method",
     );
   }
 
-  const originalCreate = target.chat.completions.create.bind(target.chat.completions);
+  const originalCreate = target.chat.completions.create.bind(
+    target.chat.completions,
+  );
 
-  target.chat.completions.create = async function (request: any, ...rest: any[]) {
+  target.chat.completions.create = async function (
+    request: any,
+    ...rest: any[]
+  ) {
     const startTime = Date.now();
     const isStream = Boolean(request?.stream);
+    let operationId: string | undefined;
+    try {
+      const extracted = opts.operationIdExtractor?.(request);
+      if (extracted === undefined || (typeof extracted === "string" && extracted.trim().length > 0 && extracted.length <= 128)) {
+        operationId = extracted;
+      } else {
+        console.warn("[ACLP SDK] operationIdExtractor returned an invalid ID; recording without operationId.");
+      }
+    } catch (extractorErr) {
+      console.warn(
+        "[ACLP SDK] operationIdExtractor failed; recording without operationId.",
+      );
+    }
 
     let rawResponse: any;
     let caughtError: any = null;
@@ -96,28 +119,43 @@ export function observeOpenAI<T = any>(
           errorCode: (
             caughtError?.code ??
             caughtError?.status ??
-            (caughtError?.name && caughtError.name !== "Error" ? caughtError.name : undefined) ??
-            (caughtError?.message ? String(caughtError.message).slice(0, 32) : "OPENAI_ERROR")
-          ).toString().slice(0, 64),
+            (caughtError?.name && caughtError.name !== "Error"
+              ? caughtError.name
+              : undefined) ??
+            (caughtError?.message
+              ? String(caughtError.message).slice(0, 32)
+              : "OPENAI_ERROR")
+          )
+            .toString()
+            .slice(0, 64),
           featureId: opts.featureId,
           customerUserId: opts.customerUserId,
           sessionId: opts.sessionId,
+          operationId,
           promptHash: AclpClient.hashPrompt(promptText),
           promptCharCount: promptText.length,
         });
       } catch (telemetryErr) {
-        console.error("[ACLP SDK] Failed to record OpenAI error telemetry:", telemetryErr);
+        console.error(
+          "[ACLP SDK] Failed to record OpenAI error telemetry:",
+          telemetryErr,
+        );
       }
       throw err;
     }
 
     // If streaming, wrap the async iterable to record telemetry once completed
-    if (isStream && rawResponse && typeof rawResponse[Symbol.asyncIterator] === "function") {
+    if (
+      isStream &&
+      rawResponse &&
+      typeof rawResponse[Symbol.asyncIterator] === "function"
+    ) {
       try {
         return wrapOpenAIStream(rawResponse, {
           aclp,
           request,
           opts,
+          operationId,
           startTime,
         });
       } catch {
@@ -133,14 +171,23 @@ export function observeOpenAI<T = any>(
       const promptHash = AclpClient.hashPrompt(promptText);
 
       const usage = rawResponse?.usage ?? {};
-      const inputTokens = typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0;
-      const outputTokens = typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0;
-      const cachedTokens = typeof usage.prompt_tokens_details?.cached_tokens === "number"
-        ? usage.prompt_tokens_details.cached_tokens
-        : undefined;
+      const inputTokens =
+        typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0;
+      const outputTokens =
+        typeof usage.completion_tokens === "number"
+          ? usage.completion_tokens
+          : 0;
+      const cachedTokens =
+        typeof usage.prompt_tokens_details?.cached_tokens === "number"
+          ? usage.prompt_tokens_details.cached_tokens
+          : undefined;
 
-      const completionContent = rawResponse?.choices?.[0]?.message?.content ?? "";
-      const completionCharCount = typeof completionContent === "string" ? completionContent.length : undefined;
+      const completionContent =
+        rawResponse?.choices?.[0]?.message?.content ?? "";
+      const completionCharCount =
+        typeof completionContent === "string"
+          ? completionContent.length
+          : undefined;
 
       let customMeta: Record<string, unknown> | undefined;
       if (typeof opts.metadataExtractor === "function") {
@@ -165,13 +212,17 @@ export function observeOpenAI<T = any>(
         featureId: opts.featureId,
         customerUserId: opts.customerUserId,
         sessionId: opts.sessionId,
+        operationId,
         promptHash,
         promptCharCount: promptText.length,
         completionCharCount,
         metadata: customMeta as any,
       });
     } catch (telemetryErr) {
-      console.error("[ACLP SDK] Failed to record OpenAI telemetry:", telemetryErr);
+      console.error(
+        "[ACLP SDK] Failed to record OpenAI telemetry:",
+        telemetryErr,
+      );
     }
 
     return rawResponse;
@@ -189,8 +240,9 @@ function wrapOpenAIStream(
     aclp: AclpClient;
     request: any;
     opts: OpenAIAdapterOptions;
+    operationId?: string;
     startTime: number;
-  }
+  },
 ): AsyncIterable<any> {
   const iterator = stream[Symbol.asyncIterator]();
   let externalId: string | undefined;
@@ -219,6 +271,7 @@ function wrapOpenAIStream(
         featureId: ctx.opts.featureId,
         customerUserId: ctx.opts.customerUserId,
         sessionId: ctx.opts.sessionId,
+        operationId: ctx.operationId,
         promptHash: AclpClient.hashPrompt(promptText),
         promptCharCount: promptText.length,
       });

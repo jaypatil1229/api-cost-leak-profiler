@@ -7,7 +7,9 @@ jest.mock("axios");
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
-function makeClient(options: { maxBatchSize?: number; maxQueueSize?: number } = {}) {
+function makeClient(
+  options: { maxBatchSize?: number; maxQueueSize?: number } = {},
+) {
   const postMock = jest.fn().mockResolvedValue({ data: { success: true } });
   mockedAxios.create = jest.fn().mockReturnValue({ post: postMock });
 
@@ -42,14 +44,25 @@ describe("AclpClient constructor", () => {
   });
 
   it("throws when apiKey or projectId is missing", () => {
-    expect(() => new AclpClient({ apiKey: "", projectId: "p" })).toThrow("apiKey");
-    expect(() => new AclpClient({ apiKey: "k", projectId: "" })).toThrow("projectId");
+    expect(() => new AclpClient({ apiKey: "", projectId: "p" })).toThrow(
+      "apiKey",
+    );
+    expect(() => new AclpClient({ apiKey: "k", projectId: "" })).toThrow(
+      "projectId",
+    );
   });
 
   it("rejects unsafe config values", () => {
-    expect(() => new AclpClient({ apiKey: "k", projectId: "p", maxQueueSize: 0 })).toThrow("maxQueueSize");
-    expect(() => new AclpClient({ apiKey: "k", projectId: "p", flushIntervalMs: 0 })).toThrow("flushIntervalMs");
-    expect(() => new AclpClient({ apiKey: "k", projectId: "p", baseUrl: "file:///tmp" })).toThrow("baseUrl");
+    expect(
+      () => new AclpClient({ apiKey: "k", projectId: "p", maxQueueSize: 0 }),
+    ).toThrow("maxQueueSize");
+    expect(
+      () => new AclpClient({ apiKey: "k", projectId: "p", flushIntervalMs: 0 }),
+    ).toThrow("flushIntervalMs");
+    expect(
+      () =>
+        new AclpClient({ apiKey: "k", projectId: "p", baseUrl: "file:///tmp" }),
+    ).toThrow("baseUrl");
   });
 });
 
@@ -70,7 +83,12 @@ describe("recordUsage", () => {
 
   it("auto-assigns an eventId if not provided", () => {
     const { client } = makeClient();
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 10, outputTokens: 5 });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 10,
+      outputTokens: 5,
+    });
     const evt = (client as any).queue[0];
     expect(typeof evt.eventId).toBe("string");
     expect(evt.eventId.length).toBeGreaterThan(0);
@@ -79,17 +97,53 @@ describe("recordUsage", () => {
 
   it("defaults status to SUCCESS and computes totalTokens", () => {
     const { client } = makeClient();
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 10, outputTokens: 5 });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 10,
+      outputTokens: 5,
+    });
     const evt = (client as any).queue[0];
     expect(evt.status).toBe("SUCCESS");
     expect(evt.totalTokens).toBe(15);
     client.shutdown();
   });
 
+  it("preserves a stable operationId and rejects invalid values", () => {
+    const { client } = makeClient();
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 1,
+      operationId: "op-42",
+    });
+    expect((client as any).queue[0].operationId).toBe("op-42");
+    expect(() =>
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "gpt-4o",
+        operationId: "  ",
+      } as any),
+    ).toThrow("operationId");
+    expect(() =>
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "gpt-4o",
+        operationId: "x".repeat(129),
+      }),
+    ).toThrow("operationId");
+    client.shutdown();
+  });
+
   it("throws for invalid provider", () => {
     const { client } = makeClient();
     expect(() =>
-      client.recordUsage({ provider: "ANTHROPIC" as any, model: "claude", inputTokens: 10, outputTokens: 5 })
+      client.recordUsage({
+        provider: "ANTHROPIC" as any,
+        model: "claude",
+        inputTokens: 10,
+        outputTokens: 5,
+      }),
     ).toThrow("Invalid provider");
     client.shutdown();
   });
@@ -97,31 +151,62 @@ describe("recordUsage", () => {
   it("throws for empty model", () => {
     const { client } = makeClient();
     expect(() =>
-      client.recordUsage({ provider: "OPENAI", model: "", inputTokens: 10, outputTokens: 5 })
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "",
+        inputTokens: 10,
+        outputTokens: 5,
+      }),
     ).toThrow("model is required");
     client.shutdown();
   });
 
   it("rejects invalid token counts instead of silently clamping them", () => {
     const { client } = makeClient();
-    expect(() => client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: -1 })).toThrow("inputTokens");
-    expect(() => client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 1.5 })).toThrow("inputTokens");
+    expect(() =>
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "gpt-4o",
+        inputTokens: -1,
+      }),
+    ).toThrow("inputTokens");
+    expect(() =>
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "gpt-4o",
+        inputTokens: 1.5,
+      }),
+    ).toThrow("inputTokens");
     client.shutdown();
   });
 
   it("rejects cached input tokens greater than total input tokens", () => {
     const { client } = makeClient();
-    expect(() => client.recordUsage({
-      provider: "OPENAI", model: "gpt-4o", inputTokens: 2, outputTokens: 0, cachedInputTokens: 3,
-    })).toThrow("cachedInputTokens cannot exceed inputTokens");
+    expect(() =>
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "gpt-4o",
+        inputTokens: 2,
+        outputTokens: 0,
+        cachedInputTokens: 3,
+      }),
+    ).toThrow("cachedInputTokens cannot exceed inputTokens");
     expect(client.getQueueLength()).toBe(0);
     client.shutdown();
   });
 
   it("rejects too-long model and event IDs", () => {
     const { client } = makeClient();
-    expect(() => client.recordUsage({ provider: "OPENAI", model: "m".repeat(121) })).toThrow("model");
-    expect(() => client.recordUsage({ provider: "OPENAI", model: "gpt-4o", eventId: "e".repeat(129) })).toThrow("eventId");
+    expect(() =>
+      client.recordUsage({ provider: "OPENAI", model: "m".repeat(121) }),
+    ).toThrow("model");
+    expect(() =>
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "gpt-4o",
+        eventId: "e".repeat(129),
+      }),
+    ).toThrow("eventId");
     client.shutdown();
   });
 
@@ -160,8 +245,19 @@ describe("recordUsage", () => {
 describe("flush", () => {
   it("sends queued events as a batch", async () => {
     const { client, postMock } = makeClient();
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 100, outputTokens: 50 });
-    client.recordUsage({ provider: "GEMINI", model: "gemini-pro", inputTokens: 200, outputTokens: 100 });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 100,
+      outputTokens: 50,
+      operationId: "operation-a",
+    });
+    client.recordUsage({
+      provider: "GEMINI",
+      model: "gemini-pro",
+      inputTokens: 200,
+      outputTokens: 100,
+    });
 
     await client.flush();
 
@@ -169,6 +265,10 @@ describe("flush", () => {
     const [url, body] = postMock.mock.calls[0];
     expect(url).toBe("/api/v1/ingest/usage/batch");
     expect(body.events).toHaveLength(2);
+    expect(body.events.map((event: any) => event.operationId)).toEqual([
+      "operation-a",
+      undefined,
+    ]);
     expect(typeof body.clientBatchId).toBe("string");
     client.shutdown();
   });
@@ -176,7 +276,12 @@ describe("flush", () => {
   it("drains all events in queue even if exceeding maxBatchSize", async () => {
     const { client, postMock } = makeClient({ maxBatchSize: 2 });
     for (let i = 0; i < 5; i++) {
-      client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 10, outputTokens: 5 });
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "gpt-4o",
+        inputTokens: 10,
+        outputTokens: 5,
+      });
     }
 
     await client.flush();
@@ -195,16 +300,29 @@ describe("flush", () => {
   });
 
   it("retains a batch after transient delivery failures for a later flush", async () => {
-    const postMock = jest.fn()
+    const postMock = jest
+      .fn()
       .mockRejectedValueOnce({ code: "ECONNRESET" })
       .mockRejectedValueOnce({ code: "ECONNRESET" })
       .mockRejectedValueOnce({ code: "ECONNRESET" })
       .mockResolvedValueOnce({ data: {} });
     mockedAxios.create = jest.fn().mockReturnValue({ post: postMock });
-    const client = new AclpClient({ apiKey: "k", projectId: "p", flushIntervalMs: 60000, maxQueueSize: 4 });
-    jest.spyOn(global, "setTimeout").mockImplementation((fn: any) => { fn(); return 0 as any; });
+    const client = new AclpClient({
+      apiKey: "k",
+      projectId: "p",
+      flushIntervalMs: 60000,
+      maxQueueSize: 4,
+    });
+    jest.spyOn(global, "setTimeout").mockImplementation((fn: any) => {
+      fn();
+      return 0 as any;
+    });
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", eventId: "persist-me" });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      eventId: "persist-me",
+    });
     await client.flush();
     expect(client.getQueueLength()).toBe(1);
     await client.flush();
@@ -225,10 +343,25 @@ describe("flush", () => {
       flushIntervalMs: 60000,
     });
 
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 10, outputTokens: 5 });
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 10, outputTokens: 5 });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 10,
+      outputTokens: 5,
+    });
     // Third event triggers auto-flush
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 10, outputTokens: 5 });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 10,
+      outputTokens: 5,
+    });
 
     await Promise.resolve();
     await new Promise((r) => setTimeout(r, 50));
@@ -244,19 +377,32 @@ describe("retry logic", () => {
   it("respects Retry-After for 429 responses", async () => {
     const postMock = jest
       .fn()
-      .mockRejectedValueOnce({ response: { status: 429, headers: { "retry-after": "2" } } })
+      .mockRejectedValueOnce({
+        response: { status: 429, headers: { "retry-after": "2" } },
+      })
       .mockResolvedValueOnce({ data: {} });
     mockedAxios.create = jest.fn().mockReturnValue({ post: postMock });
-    const client = new AclpClient({ apiKey: "aclp_test_abc", projectId: "proj-1", flushIntervalMs: 60000 });
-    const delays: number[] = [];
-    const timeoutSpy = jest.spyOn(global, "setTimeout").mockImplementation((fn: any, ms?: number) => {
-      if (typeof ms === "number") delays.push(ms);
-      fn();
-      return 0 as any;
+    const client = new AclpClient({
+      apiKey: "aclp_test_abc",
+      projectId: "proj-1",
+      flushIntervalMs: 60000,
     });
+    const delays: number[] = [];
+    const timeoutSpy = jest
+      .spyOn(global, "setTimeout")
+      .mockImplementation((fn: any, ms?: number) => {
+        if (typeof ms === "number") delays.push(ms);
+        fn();
+        return 0 as any;
+      });
 
     try {
-      client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 1, outputTokens: 1 });
+      client.recordUsage({
+        provider: "OPENAI",
+        model: "gpt-4o",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
       await client.flush();
       expect(postMock).toHaveBeenCalledTimes(2);
       expect(delays).toContain(2000);
@@ -280,9 +426,17 @@ describe("retry logic", () => {
       projectId: "proj-1",
       flushIntervalMs: 60000,
     });
-    jest.spyOn(global, "setTimeout").mockImplementation((fn: any) => { fn(); return 0 as any; });
+    jest.spyOn(global, "setTimeout").mockImplementation((fn: any) => {
+      fn();
+      return 0 as any;
+    });
 
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 10, outputTokens: 5 });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 10,
+      outputTokens: 5,
+    });
     await client.flush();
 
     expect(postMock).toHaveBeenCalledTimes(2);
@@ -294,7 +448,11 @@ describe("retry logic", () => {
   });
 
   it("drops batch on 4xx errors (not 429)", async () => {
-    const postMock = jest.fn().mockRejectedValue({ response: { status: 400, data: { message: "Bad request" } } });
+    const postMock = jest
+      .fn()
+      .mockRejectedValue({
+        response: { status: 400, data: { message: "Bad request" } },
+      });
     mockedAxios.create = jest.fn().mockReturnValue({ post: postMock });
 
     const client = new AclpClient({
@@ -304,7 +462,12 @@ describe("retry logic", () => {
     });
 
     const consoleSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-    client.recordUsage({ provider: "OPENAI", model: "gpt-4o", inputTokens: 10, outputTokens: 5 });
+    client.recordUsage({
+      provider: "OPENAI",
+      model: "gpt-4o",
+      inputTokens: 10,
+      outputTokens: 5,
+    });
     await client.flush();
 
     expect(postMock).toHaveBeenCalledTimes(1);

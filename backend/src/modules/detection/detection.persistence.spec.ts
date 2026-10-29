@@ -1,11 +1,16 @@
 jest.mock('../../config/config.module', () => ({ APP_CONFIG: 'APP_CONFIG' }));
 
-import { DetectionRunStatus, DetectorType, FindingStatus, Severity } from '@prisma/client';
+import { DetectionRunStatus, DetectorType, FindingStatus, Prisma, Severity } from '@prisma/client';
 import { DetectionService } from './detection.service';
-import type { Detector } from './detectors/detector.interface';
+import type { Detector, DetectorFinding } from './detectors/detector.interface';
 
 describe('DetectionService finding persistence', () => {
-  const dto = {
+  const dto: {
+    detectorType: DetectorType;
+    projectId: string;
+    windowStart: Date;
+    windowEnd: Date;
+  } = {
     detectorType: DetectorType.ANOMALY_ISOLATION_FOREST,
     projectId: 'project-1',
     windowStart: new Date('2026-10-01T00:00:00.000Z'),
@@ -25,7 +30,9 @@ describe('DetectionService finding persistence', () => {
     ],
   };
 
-  function setup() {
+  function setup(overrides: { runDto?: typeof dto; resultFinding?: DetectorFinding } = {}) {
+    const runDto = overrides.runDto ?? dto;
+    const resultFinding = overrides.resultFinding ?? finding;
     const tx = {
       usageRecord: {
         findMany: jest.fn().mockResolvedValue([{ id: 'usage-a' }, { id: 'usage-b' }]),
@@ -52,11 +59,11 @@ describe('DetectionService finding persistence', () => {
       $transaction: jest.fn((callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
     };
     const detector: Detector = {
-      type: dto.detectorType,
+      type: runDto.detectorType,
       kind: 'ADVANCED',
       version: '1.0.0',
       description: 'test detector',
-      run: jest.fn().mockResolvedValue({ recordsScanned: 2, findings: [finding] }),
+      run: jest.fn().mockResolvedValue({ recordsScanned: 2, findings: [resultFinding] }),
     };
     const registry = {
       get: jest.fn().mockReturnValue(detector),
@@ -125,6 +132,73 @@ describe('DetectionService finding persistence', () => {
         data: expect.objectContaining({ status: DetectionRunStatus.COMPLETED, findingsCreated: 1 }),
       }),
     );
+  });
+
+  it('persists and returns a Spend Spike finding with its estimated excess', async () => {
+    const spendDto = { ...dto, detectorType: DetectorType.SPEND_SPIKE };
+    const spendFinding = {
+      ...finding,
+      title: 'Spend spike: 3x+ increase over previous window',
+      explanation: 'Current estimated spend exceeded the baseline.',
+      severity: Severity.HIGH,
+      evidence: { currentCost: '0.31', baselineCost: '0.10', excess: '0.21' },
+      estimatedRecoverableCost: '0.21',
+      fingerprint: 'spend-spike:project-1:21',
+      issueKey: 'spend-spike:project-1:21',
+      usageRecordIds: [],
+    };
+    const { service, execute, tx, prisma, alertsService } = setup({
+      runDto: spendDto,
+      resultFinding: spendFinding,
+    });
+
+    await execute('run-spend-spike', 'org-1', spendDto);
+
+    const persisted = tx.detectionFinding.createMany.mock.calls[0][0].data[0];
+    expect(persisted).toMatchObject({
+      detectorType: DetectorType.SPEND_SPIKE,
+      evidence: spendFinding.evidence,
+      issueKey: spendFinding.issueKey,
+    });
+    expect(persisted.estimatedRecoverableCost?.toString()).toBe('0.21');
+    expect(alertsService.createAlertFromFinding).toHaveBeenCalledTimes(1);
+    const alerted = alertsService.createAlertFromFinding.mock.calls[0][1];
+    expect(alerted).toMatchObject({ title: spendFinding.title, issueKey: spendFinding.issueKey });
+    expect(alerted.estimatedRecoverableCost?.toString()).toBe('0.21');
+
+    prisma.detectionFinding.findFirst.mockResolvedValue({
+      id: 'finding-spend',
+      organizationId: 'org-1',
+      detectionRunId: 'run-spend-spike',
+      detectorType: DetectorType.SPEND_SPIKE,
+      detectorVersion: '1.0.0',
+      projectId: spendDto.projectId,
+      title: spendFinding.title,
+      explanation: spendFinding.explanation,
+      severity: Severity.HIGH,
+      status: FindingStatus.OPEN,
+      evidence: spendFinding.evidence,
+      estimatedRecoverableCost: new Prisma.Decimal('0.21'),
+      fingerprint: 'persisted-fingerprint',
+      issueKey: spendFinding.issueKey,
+      windowStart: spendDto.windowStart,
+      windowEnd: spendDto.windowEnd,
+      acknowledgedAt: null,
+      acknowledgedByUserId: null,
+      resolvedAt: null,
+      resolvedByUserId: null,
+      createdAt: spendDto.windowStart,
+      updatedAt: spendDto.windowEnd,
+    } as never);
+    const response = await service.getFinding('org-1', 'finding-spend');
+
+    expect(response).toMatchObject({
+      detectorType: DetectorType.SPEND_SPIKE,
+      title: spendFinding.title,
+      evidence: spendFinding.evidence,
+      estimatedRecoverableCost: '0.2100000000',
+      issueKey: spendFinding.issueKey,
+    });
   });
 
   it('upserts repeated results without resetting lifecycle fields', async () => {

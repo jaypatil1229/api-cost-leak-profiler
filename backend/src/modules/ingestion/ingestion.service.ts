@@ -192,6 +192,7 @@ export class IngestionService {
           projectId: input.projectId,
           eventId: event.eventId,
           externalRequestId: event.externalRequestId ?? null,
+          operationId: event.operationId ?? null,
           provider: event.provider,
           model: event.model,
           occurredAt,

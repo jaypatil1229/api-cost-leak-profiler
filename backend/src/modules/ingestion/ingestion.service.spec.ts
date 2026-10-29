@@ -14,7 +14,7 @@ describe('IngestionService', () => {
   };
   let prisma: IngestionPrismaMock;
 
-  const makeEvent = (eventId = 'evt-123') => ({
+  const makeEvent = (eventId = 'evt-123', operationId?: string) => ({
     eventId,
     provider: Provider.OPENAI,
     model: 'gpt-4',
@@ -23,6 +23,7 @@ describe('IngestionService', () => {
     outputTokens: 500,
     totalTokens: 1500,
     status: CallStatus.SUCCESS,
+    ...(operationId ? { operationId } : {}),
   });
 
   beforeEach(async () => {
@@ -80,10 +81,19 @@ describe('IngestionService', () => {
     );
   });
 
+  it('persists an optional operation ID and stores legacy events as null', async () => {
+    await service.ingestSingle(singleInput(makeEvent('evt-correlated', 'checkout-42')));
+    expect(prisma.usageRecord.create.mock.calls[0][0].data.operationId).toBe('checkout-42');
+
+    prisma.usageRecord.create.mockClear();
+    await service.ingestSingle(singleInput(makeEvent('evt-legacy')));
+    expect(prisma.usageRecord.create.mock.calls[0][0].data.operationId).toBeNull();
+  });
+
   it('returns a duplicate outcome for an event already persisted in the project', async () => {
     prisma.usageRecord.findUnique.mockResolvedValue({ id: 'existing-usage' });
 
-    const result = await service.ingestSingle(singleInput());
+    const result = await service.ingestSingle(singleInput(makeEvent('evt-123', 'operation-1')));
 
     expect(result).toEqual({
       eventId: 'evt-123',

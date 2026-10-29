@@ -216,15 +216,38 @@ ACLP_API_KEY=<key> ACLP_PROJECT_ID=<id> npx ts-node examples/demo.ts
 | `inputTokens` | `number` | ✅ | Prompt token count |
 | `outputTokens` | `number` | ✅ | Completion token count |
 | `latencyMs` | `number` | — | End-to-end latency in ms |
-| `status` | `SUCCESS \| ERROR \| TIMEOUT` | defaults `SUCCESS` | Outcome |
+| `status` | `SUCCESS \| ERROR \| TIMEOUT \| RATE_LIMITED \| CANCELLED \| UNKNOWN` | defaults `SUCCESS` | Outcome |
 | `errorCode` | `string` | — | Provider error code |
 | `externalRequestId` | `string` | — | Provider's request ID |
 | `featureId` | `string` | — | Feature/area identifier |
 | `customerUserId` | `string` | — | Your customer's user ID |
 | `sessionId` | `string` | — | Session identifier |
+| `operationId` | `string` | — | Caller-supplied ID shared by every observed attempt of one logical operation (max 128 chars); distinct logical operations need distinct IDs. |
 | `promptHash` | `string` | — | SHA256 of the prompt |
 | `promptCharCount` | `number` | — | Prompt character length |
 | `completionCharCount` | `number` | — | Completion character length |
 | `metadata` | `Record<string,string>` | — | Up to 32 key-value pairs |
 
 The client validates token and count fields as non-negative safe integers. It rejects invalid provider, model, status, event ID, timestamp, and configuration values before queueing. Events queued only in memory can still be lost if the process exits before successful delivery.
+
+### Retry-loop correlation
+
+Retry-loop detection requires an `operationId`. Supply the same stable ID for every attempt at one logical operation, and use a different ID for independent operations. Direct instrumentation can pass it to `recordUsage`:
+
+```ts
+import { randomUUID } from "node:crypto";
+
+// Generate once when the logical operation starts; reuse across its retry loop.
+const checkoutOperationId = randomUUID();
+
+client.recordUsage({
+  provider: "OPENAI",
+  model: "gpt-4o",
+  inputTokens: 120,
+  outputTokens: 0,
+  status: "ERROR",
+  operationId: checkoutOperationId,
+});
+```
+
+The OpenAI and Gemini adapters accept `operationIdExtractor(request)` to read the ID from caller-controlled request context. The extractor runs once per outer SDK call; a throwing extractor is isolated and the event is recorded without an ID. Provider SDK internal retries are not individually visible to these adapters, so their single final outcome is one usage event. Older clients that omit `operationId` continue to ingest normally but are not eligible for operation-level retry-loop findings.
