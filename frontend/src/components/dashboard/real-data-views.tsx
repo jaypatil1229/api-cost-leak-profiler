@@ -13,12 +13,16 @@ import { EmptyState, ErrorState } from "@/components/shared/empty-state";
 import { MetricTrendChart } from "@/components/charts/trend-chart";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useWorkspace } from "@/components/dashboard/workspace-provider";
+import { useAlerts } from "@/components/dashboard/alerts-provider";
 import { useSession } from "@/components/auth/session-provider";
 import { apiRequest, queryString } from "@/lib/api/client";
 import { DetectionControl } from "@/components/detection/detection-control";
 import type { Alert, ApiKey, CostReport, DetectionsReport, DetectionRun, Finding, Member, OverviewReport, Page, Timeseries, UsageRecord, UsageReport, UsageSummary } from "@/lib/api/types";
 import { formatCurrency, formatDateTime, formatNumber, formatTokens } from "@/lib/formatters";
 import { useDateRange } from "@/components/shared/date-range-selector";
+import { FINDINGS_CREATED_DESCRIPTION, getDetectorScannedDescription } from "@/lib/detection/run-metrics";
+import type { AlertNotificationSeverity } from "@/lib/alerts/browser-notifications";
+import { DEFAULT_ALERT_LIST_FILTERS, parseAlertListFilters, serializeAlertListFilters, type AlertListFilters, type AlertSeverityFilter, type AlertSortBy, type AlertStatusFilter } from "@/lib/alerts/alert-list-state";
 
 function DataState({ loading, error, retry, children }: { loading: boolean; error: string | null; retry: () => void; children: React.ReactNode }) {
   if (loading) return <div role="status" className="animate-pulse rounded-xl border border-border bg-card p-8 text-sm text-muted-foreground">Loading data from ACLP…</div>;
@@ -33,6 +37,35 @@ function WorkspaceRequired() {
   if (!organization) return <EmptyState title={organizations.length ? "Select an organization" : "No organization yet"} description={organizations.length ? "Choose an organization from the workspace selector." : "Create an organization and project to begin."} action={!organizations.length ? <Button asChild size="sm"><Link href="/onboarding">Set up workspace</Link></Button> : undefined} />;
   if (!project) return <EmptyState title="No project selected" description="Create a project or choose one from the workspace selector before viewing project usage." action={<Button asChild size="sm" variant="outline"><Link href="/project-settings">Open projects</Link></Button>} />;
   return null;
+}
+
+function DetectionRunHistory({ runs }: { runs: DetectionRun[] }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <table className="w-full min-w-[760px] text-left text-sm">
+        <thead className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="p-3">Detector</th><th className="p-3">Status</th><th className="p-3">Window</th>
+            <th className="p-3" title="Detector-specific record or input count returned for this run.">Scanned</th>
+            <th className="p-3" title={FINDINGS_CREATED_DESCRIPTION}>New findings</th><th className="p-3">Failure</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {runs.map((run) => (
+            <tr key={run.id}>
+              <td className="p-3 align-top"><span className="font-medium">{run.detectorType}</span><p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">{getDetectorScannedDescription(run.detectorType)}</p></td>
+              <td className="p-3 align-top">{run.status}</td>
+              <td className="p-3 align-top">{formatDateTime(run.windowStart)} – {formatDateTime(run.windowEnd)}</td>
+              <td className="p-3 align-top" title={getDetectorScannedDescription(run.detectorType)}>{formatNumber(run.recordsScanned)}</td>
+              <td className="p-3 align-top" title={FINDINGS_CREATED_DESCRIPTION}>{formatNumber(run.findingsCreated)}</td>
+              <td className="p-3 align-top">{run.error ?? "—"}</td>
+            </tr>
+          ))}
+          {!runs.length ? <tr><td colSpan={6} className="p-4 text-muted-foreground">No analysis runs.</td></tr> : null}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function useScope() {
@@ -108,56 +141,177 @@ export function FindingsApiView() {
   const ready = Boolean(organization && project && !workspaceLoading && !workspaceError);
   const findings = useApiQuery<Page<Finding>>(ready ? `/organizations/${organization!.id}/detection/findings${queryString({ projectId: project!.id, page, limit: 25 })}` : null);
   const runs = useApiQuery<Page<DetectionRun>>(ready ? `/organizations/${organization!.id}/detection/runs${queryString({ projectId: project!.id, limit: 10 })}` : null);
+  const reloadFindings = findings.reload;
+  const reloadRuns = runs.reload;
   React.useEffect(() => {
     if (!ready) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") {
-        findings.reload();
-        runs.reload();
+        reloadFindings();
+        reloadRuns();
       }
     }, 15_000);
     return () => window.clearInterval(timer);
-  }, [ready, findings.reload, runs.reload]);
+  }, [ready, reloadFindings, reloadRuns]);
   async function setFindingStatus(id: string, status: string) {
     try { await apiRequest(`/organizations/${organization!.id}/detection/findings/${id}/status`, { method: "PATCH", body: { status } }); findings.reload(); toast.success("Finding updated"); }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : "Could not update finding"); }
   }
   const handleRunComplete = React.useCallback(() => {
-    findings.reload();
-    runs.reload();
-  }, [findings, runs]);
+    reloadFindings();
+    reloadRuns();
+  }, [reloadFindings, reloadRuns]);
 
   return <><PageHeader title="Findings" description="Detection results and lifecycle state saved by the backend." actions={<DetectionControl buttonText="Run Analysis" buttonVariant="outline" buttonSize="sm" onRunComplete={handleRunComplete} />} />{!ready ? <WorkspaceRequired /> : <DataState loading={findings.loading || runs.loading} error={findings.error ?? runs.error} retry={() => { findings.reload(); runs.reload(); }}>
     {findings.data?.items.length ? <ul className="divide-y divide-border rounded-xl border border-border bg-card">{findings.data.items.map((finding) => <li key={finding.id} className="flex flex-wrap items-center justify-between gap-4 p-4"><div className="min-w-0"><Link className="font-medium underline-offset-4 hover:underline" href={`/findings/${finding.id}`}>{finding.title}</Link><p className="mt-1 text-xs text-muted-foreground">{finding.severity} · {finding.detectorType} · {finding.status} · {finding.estimatedRecoverableCost === null ? "Not quantified" : formatCurrency(Number(finding.estimatedRecoverableCost))}</p></div><div className="flex gap-2">{finding.status === "OPEN" ? <Button size="sm" variant="outline" onClick={() => void setFindingStatus(finding.id, "ACKNOWLEDGED")}>Acknowledge</Button> : null}{finding.status !== "RESOLVED" ? <Button size="sm" variant="outline" onClick={() => void setFindingStatus(finding.id, "RESOLVED")}>Resolve</Button> : null}</div></li>)}</ul> : <EmptyState title="No findings" description="No findings have been recorded for the selected project." />}
     <div className="flex items-center justify-between text-sm"><span>{formatNumber(findings.data?.pagination.totalItems ?? 0)} findings · {runs.data?.items.length ?? 0} recent runs</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={!findings.data?.pagination.hasPreviousPage} onClick={() => setPage((n) => n - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={!findings.data?.pagination.hasNextPage} onClick={() => setPage((n) => n + 1)}>Next</Button></div></div>
-    <SectionHeading title="Analysis runs" description="Pending, running, completed, and failed statuses reflect persisted backend run records. Spend Spike's scanned count covers cost-valued events in its current, previous, and fallback windows; it is not a finding count." />
-    <Rows headers={["Detector", "Status", "Window", "Scanned", "Findings", "Failure"]} rows={(runs.data?.items ?? []).map((r) => [r.detectorType, r.status, `${formatDateTime(r.windowStart)} – ${formatDateTime(r.windowEnd)}`, formatNumber(r.recordsScanned), formatNumber(r.findingsCreated), r.error ?? "—"])} empty="No analysis runs." />
+    <SectionHeading title="Analysis runs" description="Scanned is the detector-specific number of records or inputs examined in the saved run window. New findings counts newly inserted finding rows; a run may match and refresh an existing finding without creating a new row. A finding can link multiple usage records, and alert deduplication is separate." />
+    <DetectionRunHistory runs={runs.data?.items ?? []} />
   </DataState>}</>;
 }
 
-export function AlertsApiView() {
-  const { organization, project } = useWorkspace();
-  const [page, setPage] = React.useState(1);
-  const { loading: workspaceLoading, error: workspaceError } = useWorkspace();
-  const ready = Boolean(organization && project && !workspaceLoading && !workspaceError);
-  const alerts = useApiQuery<Page<Alert>>(ready ? `/organizations/${organization!.id}/alerts${queryString({ projectId: project!.id, page, limit: 25 })}` : null);
-  React.useEffect(() => {
-    if (!ready) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") alerts.reload();
-    }, 15_000);
-    return () => window.clearInterval(timer);
-  }, [ready, alerts.reload]);
-  async function updateStatus(id: string, status: string) {
-    try { await apiRequest(`/organizations/${organization!.id}/alerts/${id}/status`, { method: "PATCH", body: { status } }); alerts.reload(); toast.success("Alert updated"); }
-    catch (cause) { toast.error(cause instanceof Error ? cause.message : "Could not update alert"); }
-  }
-  const handleRunComplete = React.useCallback(() => {
-    alerts.reload();
-  }, [alerts]);
+function writeAlertListFiltersToUrl(filters: AlertListFilters, push = false) {
+  const url = new URL(window.location.href);
+  const nextUrl = `${url.pathname}${serializeAlertListFilters(url.search, filters)}${url.hash}`;
+  if (push) window.history.pushState(null, "", nextUrl);
+  else window.history.replaceState(null, "", nextUrl);
+}
 
-  return <><PageHeader title="Alerts" description="Persisted alert state and linked findings. Alert notifications are not configured in this backend." actions={<DetectionControl buttonText="Run Detection" buttonVariant="outline" buttonSize="sm" onRunComplete={handleRunComplete} />} />{!ready ? <WorkspaceRequired /> : <DataState loading={alerts.loading} error={alerts.error} retry={alerts.reload}>{alerts.data ? <>{alerts.data.items.length ? <ul className="divide-y divide-border rounded-xl border border-border bg-card">{alerts.data.items.map((a) => <li key={a.id} className="flex flex-wrap items-center justify-between gap-4 p-4"><div className="min-w-0"><p className="font-medium">{a.title}</p><p className="mt-1 text-xs text-muted-foreground">{a.severity} · {a.category} · {a.status} · {formatDateTime(a.createdAt)} · {a.estimatedRecoverableCost === null ? "Not quantified" : formatCurrency(Number(a.estimatedRecoverableCost))}</p>{a.findingId ? <Link href={`/findings/${a.findingId}`} className="mt-2 inline-block text-sm underline">Open related finding</Link> : null}</div><div className="flex gap-2">{a.status === "OPEN" ? <Button size="sm" variant="outline" onClick={() => void updateStatus(a.id, "ACKNOWLEDGED")}>Acknowledge</Button> : null}{a.status !== "RESOLVED" ? <Button size="sm" variant="outline" onClick={() => void updateStatus(a.id, "RESOLVED")}>Resolve</Button> : null}</div></li>)}</ul> : <EmptyState title="No alerts" description="There are no alerts for this project." />}
-    <div className="flex justify-between text-sm"><span>{alerts.data.pagination.totalItems} alerts</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={!alerts.data.pagination.hasPreviousPage} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button size="sm" variant="outline" disabled={!alerts.data.pagination.hasNextPage} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div></> : null}</DataState>}</>;
+function BrowserAlertNotificationSettings() {
+  const { browserNotifications } = useAlerts();
+  const { preferences, permission, supported } = browserNotifications;
+  const permissionLabel = !supported
+    ? "Unsupported browser"
+    : permission === "granted"
+      ? "Permission granted"
+      : permission === "denied"
+        ? "Permission blocked"
+        : "Permission not requested";
+
+  return (
+    <section aria-labelledby="alert-notifications-title" className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-2xl">
+          <h2 id="alert-notifications-title" className="font-semibold">Browser notifications</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Notifications are checked while ACLP is open in this browser. Enabling them asks the browser for permission; ACLP does not send background push notifications when the page is closed.
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground" role="status">{permissionLabel}{permission === "denied" ? " · Allow notifications in this site's browser settings to re-enable them." : ""}{browserNotifications.feedback ? ` · ${browserNotifications.feedback}` : ""}</p>
+        </div>
+        {preferences.enabled ? (
+          <Button type="button" variant="outline" onClick={browserNotifications.disable}>Disable notifications</Button>
+        ) : (
+          <Button type="button" onClick={() => void browserNotifications.enable()}>Enable notifications</Button>
+        )}
+      </div>
+      <div className="mt-4 flex flex-wrap items-end gap-5 border-t border-border pt-4">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="notification-min-severity">Minimum severity</Label>
+          <select id="notification-min-severity" className="h-9 rounded-md border bg-background px-2 text-sm" value={preferences.minimumSeverity} onChange={(event) => browserNotifications.setMinimumSeverity(event.target.value as AlertNotificationSeverity)}>
+            <option value="INFO">Info and above</option><option value="LOW">Low and above</option><option value="MEDIUM">Medium and above</option><option value="HIGH">High and above</option><option value="CRITICAL">Critical only</option>
+          </select>
+        </div>
+        <fieldset className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+          <legend className="mb-1 text-sm font-medium">Notify for status</legend>
+          {(["OPEN", "ACKNOWLEDGED"] as const).map((status) => (
+            <label key={status} className="inline-flex min-h-9 items-center gap-2">
+              <input type="checkbox" checked={preferences.statuses.includes(status)} onChange={(event) => browserNotifications.setStatusEnabled(status, event.target.checked)} />
+              {status === "OPEN" ? "Open" : "Acknowledged"}
+            </label>
+          ))}
+        </fieldset>
+      </div>
+    </section>
+  );
+}
+
+export function AlertsApiView() {
+  const { organization, project, loading: workspaceLoading, error: workspaceError } = useWorkspace();
+  const { setStatus } = useAlerts();
+  const [filters, setFilters] = React.useState<AlertListFilters>(() => typeof window === "undefined" ? DEFAULT_ALERT_LIST_FILTERS : parseAlertListFilters(window.location.search));
+  const [highlightedId, setHighlightedId] = React.useState<string | null>(null);
+  const ready = Boolean(organization && project && !workspaceLoading && !workspaceError);
+  const alerts = useApiQuery<Page<Alert>>(ready ? `/organizations/${organization!.id}/alerts${queryString({ projectId: project!.id, page: filters.page, limit: 25, status: filters.status || undefined, severity: filters.severity || undefined, sortBy: filters.sortBy, sortOrder: "desc" })}` : null);
+
+  React.useEffect(() => {
+    const syncFromUrl = () => {
+      setFilters(parseAlertListFilters(window.location.search));
+      setHighlightedId(new URLSearchParams(window.location.search).get("highlight"));
+    };
+    syncFromUrl();
+    window.addEventListener("popstate", syncFromUrl);
+    return () => window.removeEventListener("popstate", syncFromUrl);
+  }, []);
+
+  React.useEffect(() => {
+    if (!highlightedId || !alerts.data) return;
+    document.getElementById(`alert-${highlightedId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightedId, alerts.data]);
+
+  const applyFilters = (next: AlertListFilters) => {
+    setFilters(next);
+    writeAlertListFiltersToUrl(next);
+  };
+  const setPage = (page: number) => {
+    const next = { ...filters, page };
+    setFilters(next);
+    writeAlertListFiltersToUrl(next, true);
+  };
+  const reloadAlerts = alerts.reload;
+  const handleRunComplete = React.useCallback(() => reloadAlerts(), [reloadAlerts]);
+
+  return (
+    <>
+      <PageHeader title="Alerts" description="Persisted alert state, linked findings, and notification preferences." actions={<DetectionControl buttonText="Run Detection" buttonVariant="outline" buttonSize="sm" onRunComplete={handleRunComplete} />} />
+      {!ready ? <WorkspaceRequired /> : (
+        <div className="flex flex-col gap-5">
+          <BrowserAlertNotificationSettings />
+          <DataState loading={alerts.loading} error={alerts.error} retry={alerts.reload}>
+            {alerts.data ? <>
+              <section aria-label="Alert filters" className="flex flex-wrap items-end gap-4 rounded-xl border border-border bg-card p-4">
+                <div className="flex flex-col gap-1"><Label htmlFor="alert-status-filter">Status</Label><select id="alert-status-filter" className="h-9 rounded-md border bg-background px-2 text-sm" value={filters.status} onChange={(event) => applyFilters({ ...filters, page: 1, status: event.target.value as AlertStatusFilter })}><option value="">All statuses</option><option value="OPEN">Open</option><option value="ACKNOWLEDGED">Acknowledged</option><option value="RESOLVED">Resolved</option><option value="DISMISSED">Dismissed</option></select></div>
+                <div className="flex flex-col gap-1"><Label htmlFor="alert-severity-filter">Severity</Label><select id="alert-severity-filter" className="h-9 rounded-md border bg-background px-2 text-sm" value={filters.severity} onChange={(event) => applyFilters({ ...filters, page: 1, severity: event.target.value as AlertSeverityFilter })}><option value="">All severities</option><option value="INFO">Info</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option></select></div>
+                <div className="flex flex-col gap-1"><Label htmlFor="alert-sort">Sort by</Label><select id="alert-sort" className="h-9 rounded-md border bg-background px-2 text-sm" value={filters.sortBy} onChange={(event) => applyFilters({ ...filters, page: 1, sortBy: event.target.value as AlertSortBy })}><option value="updatedAt">Recently updated</option><option value="createdAt">Newly created</option><option value="severity">Severity · highest first</option></select></div>
+                <p className="pb-2 text-xs text-muted-foreground">The API sorts before pagination. Selected filters and sort are kept in this page URL.</p>
+              </section>
+              {alerts.data.items.length ? (
+                <ul aria-label="Alerts" className="divide-y divide-border rounded-xl border border-border bg-card">
+                  {alerts.data.items.map((alert) => (
+                    <li id={`alert-${alert.id}`} key={alert.id} data-highlighted={highlightedId === alert.id || undefined} className={`flex flex-wrap items-start justify-between gap-4 p-4 transition-colors ${highlightedId === alert.id ? "border-l-4 border-primary bg-primary/5" : ""}`}>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-border px-2 py-0.5 text-xs font-medium">{alert.severity}</span>
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{alert.status}</span>
+                          <span className="text-xs text-muted-foreground">{alert.category}</span>
+                        </div>
+                        <h2 className="mt-2 font-medium">{alert.title}</h2>
+                        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{alert.message}</p>
+                        <dl className="mt-3 grid gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
+                          <div><dt className="inline font-medium text-foreground">Project: </dt><dd className="inline">{alert.projectId === project!.id ? project!.name : "Organization-wide"}</dd></div>
+                          <div><dt className="inline font-medium text-foreground">Last updated: </dt><dd className="inline">{formatDateTime(alert.updatedAt)}</dd></div>
+                          <div><dt className="inline font-medium text-foreground">Created: </dt><dd className="inline">{formatDateTime(alert.createdAt)}</dd></div>
+                          <div><dt className="inline font-medium text-foreground">Recoverable estimate: </dt><dd className="inline">{alert.estimatedRecoverableCost === null ? "Not quantified" : formatCurrency(Number(alert.estimatedRecoverableCost))}</dd></div>
+                        </dl>
+                        {alert.findingId ? <Link href={`/findings/${alert.findingId}`} className="mt-3 inline-block min-h-9 py-2 text-sm font-medium underline underline-offset-4">Open finding and linked evidence</Link> : <p className="mt-3 text-xs text-muted-foreground">No linked finding is available for this alert.</p>}
+                      </div>
+                      <div className="flex gap-2">
+                        {alert.status === "OPEN" ? <Button size="sm" variant="outline" onClick={() => { void setStatus(alert.id, "ACKNOWLEDGED").then(alerts.reload); }}>Acknowledge</Button> : null}
+                        {alert.status !== "RESOLVED" && alert.status !== "DISMISSED" ? <Button size="sm" variant="outline" onClick={() => { void setStatus(alert.id, "RESOLVED").then(alerts.reload); }}>Resolve</Button> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : <EmptyState title={filters.status || filters.severity ? "No matching alerts" : "No alerts"} description={filters.status || filters.severity ? "Adjust the status or severity filters to see other alerts." : "There are no alerts for this project."} />}
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                <span>{formatNumber(alerts.data.pagination.totalItems)} alerts · page {alerts.data.pagination.page} of {alerts.data.pagination.totalPages || 1}</span>
+                <div className="flex gap-2"><Button size="sm" variant="outline" disabled={!alerts.data.pagination.hasPreviousPage} onClick={() => setPage(filters.page - 1)}>Previous</Button><Button size="sm" variant="outline" disabled={!alerts.data.pagination.hasNextPage} onClick={() => setPage(filters.page + 1)}>Next</Button></div>
+              </div>
+            </> : null}
+          </DataState>
+        </div>
+      )}
+    </>
+  );
 }
 
 export function TrendsApiView() {
@@ -387,5 +541,8 @@ export function FindingDetailApiView() {
   const { id } = useParams<{ id: string }>();
   const { organization } = useWorkspace();
   const finding = useApiQuery<Finding>(organization && id ? `/organizations/${organization.id}/detection/findings/${id}` : null);
-  return <><PageHeader title="Finding details" description="Finding evidence and status from the backend API." />{!organization ? <WorkspaceRequired /> : <DataState loading={finding.loading} error={finding.error} retry={finding.reload}>{finding.data ? <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5"><h2 className="text-xl font-medium">{finding.data.title}</h2><p>{finding.data.explanation}</p><Rows headers={["Detector", "Severity", "Status", "Affected window", "Estimated recoverable"]} rows={[[finding.data.detectorType, finding.data.severity, finding.data.status, `${formatDateTime(finding.data.windowStart)} – ${formatDateTime(finding.data.windowEnd)}`, finding.data.estimatedRecoverableCost === null ? "Not quantified" : formatCurrency(Number(finding.data.estimatedRecoverableCost))]]} /><pre className="overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify(finding.data.evidence, null, 2)}</pre><p className="text-xs text-muted-foreground">Anomaly and similarity signals are not calibrated probabilities. Prompt text is not displayed.</p></div> : null}</DataState>}</>;
+  const run = useApiQuery<DetectionRun>(organization && finding.data?.detectionRunId ? `/organizations/${organization.id}/detection/runs/${finding.data.detectionRunId}` : null);
+  return <><PageHeader title="Finding details" description="Finding evidence, status, and originating detector run from the backend API." />{!organization ? <WorkspaceRequired /> : <DataState loading={finding.loading} error={finding.error} retry={finding.reload}>{finding.data ? <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5"><h2 className="text-xl font-medium">{finding.data.title}</h2><p>{finding.data.explanation}</p><Rows headers={["Detector", "Severity", "Status", "Affected window", "Estimated recoverable"]} rows={[[finding.data.detectorType, finding.data.severity, finding.data.status, `${formatDateTime(finding.data.windowStart)} – ${formatDateTime(finding.data.windowEnd)}`, finding.data.estimatedRecoverableCost === null ? "Not quantified" : formatCurrency(Number(finding.data.estimatedRecoverableCost))]]} />
+      {finding.data.detectionRunId ? <section className="rounded-lg border border-border p-4"><h3 className="font-medium">Originating run metrics</h3>{run.data ? <><dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3"><div><dt className="text-muted-foreground">Scanned</dt><dd className="font-medium">{formatNumber(run.data.recordsScanned)}</dd></div><div><dt className="text-muted-foreground">New findings</dt><dd className="font-medium">{formatNumber(run.data.findingsCreated)}</dd></div><div><dt className="text-muted-foreground">Run status</dt><dd className="font-medium">{run.data.status}</dd></div></dl><p className="mt-3 text-xs leading-relaxed text-muted-foreground"><strong>Scanned:</strong> {getDetectorScannedDescription(run.data.detectorType)} <strong>New findings:</strong> {FINDINGS_CREATED_DESCRIPTION}</p></> : <p className="mt-2 text-sm text-muted-foreground">{run.loading ? "Loading the originating run…" : run.error ? `Run metrics unavailable: ${run.error}` : "No run metrics are available."}</p>}</section> : null}
+      <pre className="overflow-auto rounded-lg bg-muted p-4 text-xs">{JSON.stringify(finding.data.evidence, null, 2)}</pre><p className="text-xs text-muted-foreground">Anomaly and similarity signals are not calibrated probabilities. Prompt text is not displayed.</p></div> : null}</DataState>}</>;
 }

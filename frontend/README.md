@@ -40,3 +40,11 @@ The dashboard calls authenticated NestJS routes under `/api/v1` and unwraps the 
 `/auth/me` supplies organizations and memberships. Organization and project selection is session-scoped and every data request is still authorized and tenant-scoped by the backend. Logout clears the session and the protected dashboard redirects to sign-in after session expiry.
 
 Password reset, invitation management, API key management, budget/pricing settings, and saved report actions are not connected because the corresponding user flows are not implemented by the backend. The marketing product demonstration remains an explicitly illustrative sample. Dashboard routes use API data and show loading, empty, or error states.
+
+## Alert ordering and browser notifications
+
+The Alerts page defaults to most recently updated first. The API applies the selected sort and status/severity filters before pagination, with timestamp and alert ID tie-breakers for stable page boundaries. List preferences are represented in the page URL so reloads retain the selected filters.
+
+Browser notifications are opt-in and use the browser Notification API while the authenticated ACLP dashboard is open. Permission is requested only after selecting **Enable notifications** on the Alerts page. Severity/status preferences are stored in local storage scoped to the signed-in user, organization, and project. Existing alerts are treated as the initial snapshot; repeated polls and refreshes of an existing alert do not produce another notification. Notifications are not delivered while the page is closed or the browser is not running.
+
+True background Web Push is not implemented. It would require HTTPS service-worker registration, VAPID public/private keys held by the server, authenticated subscription create/revoke endpoints and tenant/user-scoped subscription storage, plus a server-side delivery worker with expired-subscription handling. No VAPID values or push credentials are configured by the current browser-notification implementation.
