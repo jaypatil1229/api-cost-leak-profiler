@@ -21,6 +21,7 @@ function aggregate(cost: string | null, count: number) {
 describe('SpendSpikeDetector', () => {
   let detector: SpendSpikeDetector;
   let aggregateUsage: jest.Mock;
+  let findUsage: jest.Mock;
 
   function setWindows(
     current: ReturnType<typeof aggregate>,
@@ -35,8 +36,9 @@ describe('SpendSpikeDetector', () => {
 
   beforeEach(() => {
     aggregateUsage = jest.fn();
+    findUsage = jest.fn().mockResolvedValue([]);
     detector = new SpendSpikeDetector({
-      usageRecord: { aggregate: aggregateUsage },
+      usageRecord: { aggregate: aggregateUsage, findMany: findUsage },
     } as unknown as PrismaService);
   });
 
@@ -60,6 +62,9 @@ describe('SpendSpikeDetector', () => {
 
   it('uses the older nonzero window when immediate prior spend is zero', async () => {
     setWindows(aggregate('0.31', 2), aggregate('0', 1), aggregate('0.10', 3));
+    findUsage
+      .mockResolvedValueOnce([{ id: 'current-1' }, { id: 'current-2' }])
+      .mockResolvedValueOnce([{ id: 'baseline-1' }]);
 
     const result = await detector.run(context);
 
@@ -76,6 +81,17 @@ describe('SpendSpikeDetector', () => {
         excess: '0.2100000000',
         windowCounts: { current: 2, baseline: 3 },
       },
+      usageRecordIds: [
+        { id: 'current-1', role: 'current' },
+        { id: 'current-2', role: 'current' },
+        { id: 'baseline-1', role: 'baseline' },
+      ],
+    });
+    expect(findUsage).toHaveBeenCalledTimes(2);
+    expect(findUsage.mock.calls[0][0].where.occurredAt).toEqual({ gte: context.windowStart, lt: context.windowEnd });
+    expect(findUsage.mock.calls[1][0].where.occurredAt).toEqual({
+      gte: new Date('2026-10-29T08:00:00.000Z'),
+      lt: new Date('2026-10-29T09:00:00.000Z'),
     });
   });
 

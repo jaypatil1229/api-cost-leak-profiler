@@ -46,16 +46,16 @@ The chatbot is optimized for faster responses:
 Requirements: Node.js 20+, a Gemini API key, and (for end-to-end ingestion) a running ACLP backend with a configured database.
 
 1. Copy `.env.example` to `.env` and set `GEMINI_API_KEY`. Optionally change `GEMINI_MODEL`.
-2. Set `ACLP_API_KEY` to a project API key with `USAGE_WRITE` scope. Set `ACLP_INGEST_URL` if the backend is not at `http://localhost:4000` (default is `http://localhost:4000/api/v1/ingest/usage`).
+2. Set `ACLP_API_KEY` to a project API key with `USAGE_WRITE` scope. `ACLP_INGEST_URL` defaults to `http://localhost:3000/api/v1/ingest/usage`; it may also be set to a backend base URL such as `http://localhost:3000`.
 3. From this directory, run `npm start` and open <http://localhost:4173>.
 
-The app calls Gemini's Interactions API directly from its local Node server, using `store: false` so provider interactions are not retained. The API key stays server-side. Without an ACLP API key, Gemini requests still run and local token totals are shown, but events are not ingested. The backend requires a database connection for persistence. Configure `GEMINI` model pricing in ACLP if you also want cost estimates; without a matching pricing row events remain `PENDING_PRICING`.
+The app calls Gemini from its local Node server, keeping the provider API key server-side. Without an ACLP API key, Gemini requests still run and local token totals are shown, but events are not ingested. The backend requires a database connection for persistence. Configure `GEMINI` model pricing in ACLP if you also want cost estimates; without a matching pricing row events remain `PENDING_PRICING`.
 
-To prepare ACLP, start its backend, register/sign in, create an organization and project, then create a project API key with `USAGE_WRITE`. The API key is displayed once when created. See [backend setup](../backend/README.md) and the Swagger UI at <http://localhost:4000/api/v1/docs>.
+To prepare ACLP, start its backend, register/sign in, create an organization and project, then create a project API key with `USAGE_WRITE`. The API key is displayed once when created. See [backend setup](../backend/README.md) and the Swagger UI at <http://localhost:3000/api/v1/docs>.
 
 ## Scenarios and detector evidence
 
-Run one scenario at a time, then start an authenticated detection run in Swagger for the selected project and a window covering the generated events. The app uses a common session ID for calls within each scenario and writes feature IDs such as `duplicate.resume.builder` or `spend-spike.baseline`, making attribution visible in ACLP.
+Run one scenario at a time. The test app reports provider outcomes and ACLP ingestion responses, but ingestion acceptance does not independently prove database persistence and the app does not start a detector. Inspect a completed automatic run or start an authenticated detection run for the selected project and the event window. The app assigns a scenario run ID in event metadata and uses a common session ID for calls within each scenario, making the events traceable in ACLP.
 
 In Swagger, authorize with a user access token, then call `POST /api/v1/organizations/{organizationId}/detection/runs`. Set `projectId` to the demo project's ID and the time window to include the generated events. Example for duplicate prompt detection (substitute the IDs and detector type):
 
@@ -73,12 +73,13 @@ Use `RETRY_LOOP`, `UNBOUNDED_CONTEXT`, `OVERSIZED_PROMPT`, or `SPEND_SPIKE` for 
 | Scenario in the app | Events produced | Intended detector signal |
 | --- | --- | --- |
 | Duplicate prompt | Two calls with the same prompt hash and distinct event IDs | `DUPLICATE_PROMPT` groups the matching hashes |
-| Retry loop | Five quick calls with the same prompt, session, and model | `RETRY_LOOP` sees a rapid repeated sequence. The current heuristic detects rapid repetition; it does not require error statuses. |
+| Retry loop | Five real Gemini calls with the same prompt, session, and model | `RETRY_LOOP` sees a rapid repeated sequence. Provider latency can spread calls beyond detector windows. |
+| Retry loop (test-only simulated) | Five zero-token events with one operation ID; statuses and metadata explicitly mark the controlled simulation | Exercises ingestion and detector persistence without Gemini calls; this is not evidence of real provider retries. |
 | Unbounded context | Five chat calls with an increasingly long conversation transcript | `UNBOUNDED_CONTEXT` sees rising input tokens in one session |
 | Oversized prompt | One request with about 260,000 source characters, approximately 50k+ tokens depending on tokenization | `OVERSIZED_PROMPT` checks for at least 50,000 input tokens |
-| Spend spike | One small event timestamped 90 minutes ago, then four current larger requests | `SPEND_SPIKE` compares the current one-hour window with the previous equal window; it needs a matching pricing row and current spend over 3× the baseline |
+| Spend spike | Stage 1 sends one small real baseline request with its actual provider timestamp. After 15 minutes, stage 2 sends ten large-context real Gemini calls with actual timestamps. The default automatic detector runs every 5 minutes over a 10-minute lookback, so the baseline falls in its previous or two-windows-ago comparison window. | `SPEND_SPIKE` requires current cost strictly over 3× the selected nonzero baseline and strictly more than $0.10 excess. The 260,000-character source is based on the provided notes; the app uses Gemini-reported token counts and never substitutes character-based token estimates. At observed pricing/tokenization this burst can cost about $0.20; actual cost varies. The app does not run detection or verify persistence; check a completed run and its linked finding. |
 
-These scenarios use real Gemini calls and may incur charges. Retry-loop runs five calls; unbounded-context runs five; spend-spike runs five; oversized-prompt sends a large input that could be rejected by the selected model's context limit. Choose `GEMINI_MODEL` in `.env` if needed. The oversized prompt is intentionally not run automatically. Each API response's reported prompt, candidate, and total token counts are used; estimates based on character length are not substituted.
+The five regular scenarios use real Gemini calls and may incur charges. The separate `retry-loop-simulated` test fixture makes no provider calls and labels every event `metadata.simulated=true`. Duplicate runs two calls; retry-loop and unbounded-context each run five calls; Spend Spike runs one baseline request and, after a 15-minute wait, ten large current requests; oversized-prompt sends a large input that could be rejected by the selected model's context limit. Choose `GEMINI_MODEL` in `.env` if needed. Each successful provider response's reported token counts are used; estimates based on character length are not substituted. The app separately reports provider outcomes and ingestion outcomes. `accepted` or `duplicate` is the backend's ingestion outcome, not proof of database persistence; detection and findings must be verified through the authenticated backend/dashboard.
 
 The backend detectors are relatively simple heuristics. Their thresholds and query windows are defined in `backend/src/modules/detection/detectors/`. A detector run can complete asynchronously, so refresh its run status in Swagger before checking findings. Detection output depends on the selected time window, backend pricing data, and successful ingestion.
 

@@ -26,6 +26,12 @@ export function useApiQuery<T>(path: string | null) {
     return () => { active = false; };
   }, [path, revision]);
 
-  const current = path && state?.key === path && state.revision === revision ? state : null;
-  return { data: current?.data ?? null, error: current?.error ?? null, loading: Boolean(path && !current), reload };
+  const matching = path && state?.key === path ? state : null;
+  const current = matching && matching.revision === revision ? matching : null;
+  return {
+    data: current?.data ?? matching?.data ?? null,
+    error: current?.error ?? matching?.error ?? null,
+    loading: Boolean(path && !matching),
+    reload,
+  };
 }

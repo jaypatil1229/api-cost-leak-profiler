@@ -86,6 +86,30 @@ export class SpendSpikeDetector implements Detector {
       const minimumIncrease = new Prisma.Decimal(MIN_ABSOLUTE_INCREASE_USD);
 
       if (ratio.greaterThan(SPIKE_THRESHOLD_MULTIPLIER) && excess.greaterThan(minimumIncrease)) {
+        const baselineWindowStart =
+          baselineWindow === 'immediate-previous' ? previousStart : twoWindowsAgoStart;
+        const baselineWindowEnd =
+          baselineWindow === 'immediate-previous' ? context.windowStart : previousStart;
+        const [currentEvidence, baselineEvidence] = await Promise.all([
+          this.prisma.usageRecord.findMany({
+            where: {
+              organizationId: context.organizationId,
+              projectId: context.projectId,
+              occurredAt: { gte: context.windowStart, lt: context.windowEnd },
+              estimatedTotalCost: { not: null },
+            },
+            select: { id: true },
+          }),
+          this.prisma.usageRecord.findMany({
+            where: {
+              organizationId: context.organizationId,
+              projectId: context.projectId,
+              occurredAt: { gte: baselineWindowStart, lt: baselineWindowEnd },
+              estimatedTotalCost: { not: null },
+            },
+            select: { id: true },
+          }),
+        ]);
         const multiplier = ratio.toDecimalPlaces(2).toNumber();
 
         // Create stable fingerprint based on project and spike magnitude
@@ -114,7 +138,10 @@ export class SpendSpikeDetector implements Detector {
           estimatedRecoverableCost: toMoneyString(excess),
           fingerprint,
           issueKey: fingerprint, // Use same stable key for alert deduplication
-          usageRecordIds: [],
+          usageRecordIds: [
+            ...currentEvidence.map(({ id }) => ({ id, role: 'current' })),
+            ...baselineEvidence.map(({ id }) => ({ id, role: 'baseline' })),
+          ],
         });
       }
     }

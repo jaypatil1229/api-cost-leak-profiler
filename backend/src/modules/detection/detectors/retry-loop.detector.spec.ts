@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DetectorType, Severity } from '@prisma/client';
+import { DetectorType, Prisma, Severity } from '@prisma/client';
 
 import { PrismaService } from '../../../database/prisma.service';
 import { RetryLoopDetector } from './retry-loop.detector';
@@ -64,8 +64,10 @@ describe('RetryLoopDetector', () => {
       ['SUCCESS', 'SUCCESS', 'SUCCESS', 'SUCCESS', 'SUCCESS'],
       'shared-op',
     );
-    prisma.usageRecord.findMany.mockImplementation(async (args: any) =>
-      args.where.projectId === 'project-1' ? (projectOne as any) : (projectTwo as any),
+    prisma.usageRecord.findMany.mockImplementation((args) =>
+      Promise.resolve(
+        (args?.where?.projectId === 'project-1' ? projectOne : projectTwo) as any,
+      ) as Prisma.PrismaPromise<any>,
     );
 
     const first = await detector.run({ ...context, projectId: 'project-1' });
@@ -74,10 +76,9 @@ describe('RetryLoopDetector', () => {
     expect(first.findings).toHaveLength(1);
     expect(second.findings).toHaveLength(0);
     expect(first.findings[0].evidence.attemptCount).toBe(5);
-    expect(prisma.usageRecord.findMany.mock.calls.map(([args]) => args.where.projectId)).toEqual([
-      'project-1',
-      'project-2',
-    ]);
+    expect(
+      prisma.usageRecord.findMany.mock.calls.map(([args]) => args?.where?.projectId),
+    ).toEqual(['project-1', 'project-2']);
   });
 
   it('does not flag rapid successful independent operations', async () => {

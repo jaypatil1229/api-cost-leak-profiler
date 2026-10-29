@@ -4,15 +4,65 @@ const scenario = $("scenario");
 const scenarioHelp = {
   duplicate: "Sends the exact same feature prompt twice with distinct event IDs. The shared prompt hash lets the duplicate detector group them.",
   "retry-loop": "Makes five rapid calls with the same prompt, model, and session. This produces the repeated-call pattern the current detector identifies as a possible retry loop.",
+  "retry-loop-simulated": "TEST ONLY: sends five explicitly simulated retry outcomes through ACLP ingestion; it makes no Gemini calls and does not represent provider failures.",
   "unbounded-context": "Makes five chat calls while retaining an increasingly long transcript. Input token counts should rise across one session.",
   "oversized-prompt": "Expands the source material to roughly 260k characters (about 50k+ tokens). This can cost more and may exceed a model's context limit.",
-  "spend-spike": "Writes one small baseline event 90 minutes ago, then makes four larger calls now. Detection compares adjacent one-hour windows; make sure ACLP pricing exists for your chosen model.",
+  "spend-spike": "Two stages: one real, small baseline call now, then ten large real Gemini requests after 15 minutes so the default 10-minute automatic detector can compare adjacent windows. The current burst needs >3x spend and >$0.10 excess; these requests can incur about $0.20 at the current model's pricing. This app reports provider and ingestion outcomes, but does not verify database persistence or run detection.",
   "anomaly-detection": "Generates a baseline of normal usage, then adds anomalous patterns (unusually large requests, extreme costs, outlier token counts). Requires Python analytics service for Isolation Forest detection."
 };
 scenario.addEventListener("change", () => { $("scenarioHelp").textContent = scenarioHelp[scenario.value]; });
 scenario.dispatchEvent(new Event("change"));
 
+const spendSpikeStorageKey = "aclp-spend-spike-run";
+let activeSpendSpike = null;
+try { activeSpendSpike = JSON.parse(sessionStorage.getItem(spendSpikeStorageKey) || "null"); } catch { activeSpendSpike = null; }
+let spendSpikeTimer = null;
+let scenarioRequestRunning = false;
+
 function number(value) { return Number(value || 0).toLocaleString(); }
+function updateSpendSpikeButton(button) {
+  if (scenarioRequestRunning) return;
+  if (!activeSpendSpike || scenario.value !== "spend-spike") {
+    button.disabled = false;
+    button.textContent = button.dataset.label || "Run selected scenario ↗";
+    if (spendSpikeTimer) clearInterval(spendSpikeTimer);
+    spendSpikeTimer = null;
+    return;
+  }
+  const remaining = Math.max(0, Date.parse(activeSpendSpike.readyAt) - Date.now());
+  if (remaining === 0) {
+    button.disabled = false;
+    button.textContent = "Run spend burst";
+    if (spendSpikeTimer) clearInterval(spendSpikeTimer);
+    spendSpikeTimer = null;
+    return;
+  }
+  button.disabled = true;
+  const seconds = Math.ceil(remaining / 1000);
+  button.textContent = `Baseline window · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  if (!spendSpikeTimer) spendSpikeTimer = setInterval(() => updateSpendSpikeButton(button), 1000);
+}
+scenario.addEventListener("change", () => updateSpendSpikeButton($("runScenario")));
+
+function summarizeStages(result) {
+  const e = result.execution;
+  if (!e) return "Generation result received; delivery outcomes unavailable.";
+  const delivery = `${e.ingestionAccepted} accepted · ${e.ingestionDuplicates} duplicate · ${e.ingestionRejected} rejected · ${e.deliveryUnconfirmed} unconfirmed`;
+  const provider = `${e.providerRequests} Gemini request(s): ${e.providerSuccesses} success · ${e.providerFailures} failure`;
+  if (result.stage === "baseline_ready") {
+    return `Baseline stage complete · ${provider} · ACLP delivery ${delivery}. Burst is scheduled after ${new Date(result.readyAt).toLocaleTimeString()} local time. Persistence is not independently checked; detector has not run.`;
+  }
+  if (result.stage === "waiting_for_baseline_window") {
+    return `Baseline event ${result.baselineEventId} was accepted. No Gemini request was made; wait until ${new Date(result.readyAt).toLocaleTimeString()} local time. Persistence is not independently checked; detector has not run.`;
+  }
+  const generation = result.stage === "complete" ? "Scenario generation complete" : `Scenario generation ${result.stage}`;
+  return `${generation} · ${provider} · ACLP delivery ${delivery}. Acceptance is not a database persistence check; the SDK test app does not run detection.`;
+}
+
+function renderScenarioEvents(events = []) {
+  if (!events.length) return "No new usage events were emitted in this stage.";
+  return events.map((event) => `${event.eventId} · ${event.status} · ${event.model} · ${number(event.inputTokens)} in / ${number(event.outputTokens)} out · ACLP ${event.ingestion || "unconfirmed"}`).join("\n");
+}
 function render(data) {
   const t = data.totals;
   $("calls").textContent = number(t.calls);
@@ -30,17 +80,35 @@ async function status() {
   pill.className = `pill ${s.configured && s.ingestConfigured ? "good" : s.configured ? "" : "bad"}`;
 }
 async function run(button, body) {
+  scenarioRequestRunning = true;
   button.disabled = true; button.dataset.label ||= button.textContent; button.textContent = "Calling Gemini…";
   $("resultMeta").textContent = "Waiting for provider response";
   try {
-    const response = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const requestBody = body.scenario === "spend-spike" && activeSpendSpike
+      ? { scenario: "spend-spike", scenarioRunId: activeSpendSpike.scenarioRunId }
+      : body;
+    const response = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Request failed");
-    $("output").textContent = result.outputs.map((o,i) => `Call ${i+1} · ${o.featureId} · ${number(o.usage.totalTokens)} tokens\n${o.text}`).join("\n\n────────────────────────\n\n");
-    $("resultMeta").textContent = `${result.outputs.length} Gemini call(s) · metadata emitted`;
+    if (result.scenario === "spend-spike" && result.stage === "baseline_ready") {
+      activeSpendSpike = { scenarioRunId: result.scenarioRunId, readyAt: result.readyAt };
+      sessionStorage.setItem(spendSpikeStorageKey, JSON.stringify(activeSpendSpike));
+    } else if (result.scenario === "spend-spike" && ["complete", "failed", "baseline_delivery_failed"].includes(result.stage)) {
+      activeSpendSpike = null;
+      sessionStorage.removeItem(spendSpikeStorageKey);
+    }
+    const outputText = (result.outputs || []).map((o,i) => `Gemini response ${i+1} · ${o.featureId} · ${number(o.usage.totalTokens)} provider-reported tokens\n${String(o.text).slice(0, 700)}`).join("\n\n────────────────────────\n\n");
+    const eventsText = renderScenarioEvents(result.newEvents);
+    $("output").textContent = `Scenario run ID: ${result.scenarioRunId || "not assigned"}\nStage: ${result.stage || "complete"}\n\n${outputText}\n\nACLP event outcomes:\n${eventsText}`;
+    $("resultMeta").textContent = summarizeStages(result);
     await refresh();
-  } catch (error) { $("output").textContent = error.message; $("resultMeta").textContent = "Request failed"; }
-  finally { button.disabled = false; button.textContent = button.dataset.label; }
+  } catch (error) { $("output").textContent = error.message; $("resultMeta").textContent = "Scenario request failed; inspect event delivery separately."; }
+  finally {
+    scenarioRequestRunning = false;
+    button.disabled = false;
+    button.textContent = button.dataset.label;
+    updateSpendSpikeButton(button);
+  }
 }
 $("runFeature").addEventListener("click", (event) => run(event.currentTarget, { feature: features.value, text: $("input").value, scenario: "normal" }));
 $("runScenario").addEventListener("click", (event) => run(event.currentTarget, { feature: features.value, text: $("input").value, scenario: scenario.value }));

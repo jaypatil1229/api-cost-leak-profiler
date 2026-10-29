@@ -108,6 +108,16 @@ export function FindingsApiView() {
   const ready = Boolean(organization && project && !workspaceLoading && !workspaceError);
   const findings = useApiQuery<Page<Finding>>(ready ? `/organizations/${organization!.id}/detection/findings${queryString({ projectId: project!.id, page, limit: 25 })}` : null);
   const runs = useApiQuery<Page<DetectionRun>>(ready ? `/organizations/${organization!.id}/detection/runs${queryString({ projectId: project!.id, limit: 10 })}` : null);
+  React.useEffect(() => {
+    if (!ready) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        findings.reload();
+        runs.reload();
+      }
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [ready, findings.reload, runs.reload]);
   async function setFindingStatus(id: string, status: string) {
     try { await apiRequest(`/organizations/${organization!.id}/detection/findings/${id}/status`, { method: "PATCH", body: { status } }); findings.reload(); toast.success("Finding updated"); }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : "Could not update finding"); }
@@ -120,7 +130,7 @@ export function FindingsApiView() {
   return <><PageHeader title="Findings" description="Detection results and lifecycle state saved by the backend." actions={<DetectionControl buttonText="Run Analysis" buttonVariant="outline" buttonSize="sm" onRunComplete={handleRunComplete} />} />{!ready ? <WorkspaceRequired /> : <DataState loading={findings.loading || runs.loading} error={findings.error ?? runs.error} retry={() => { findings.reload(); runs.reload(); }}>
     {findings.data?.items.length ? <ul className="divide-y divide-border rounded-xl border border-border bg-card">{findings.data.items.map((finding) => <li key={finding.id} className="flex flex-wrap items-center justify-between gap-4 p-4"><div className="min-w-0"><Link className="font-medium underline-offset-4 hover:underline" href={`/findings/${finding.id}`}>{finding.title}</Link><p className="mt-1 text-xs text-muted-foreground">{finding.severity} · {finding.detectorType} · {finding.status} · {finding.estimatedRecoverableCost === null ? "Not quantified" : formatCurrency(Number(finding.estimatedRecoverableCost))}</p></div><div className="flex gap-2">{finding.status === "OPEN" ? <Button size="sm" variant="outline" onClick={() => void setFindingStatus(finding.id, "ACKNOWLEDGED")}>Acknowledge</Button> : null}{finding.status !== "RESOLVED" ? <Button size="sm" variant="outline" onClick={() => void setFindingStatus(finding.id, "RESOLVED")}>Resolve</Button> : null}</div></li>)}</ul> : <EmptyState title="No findings" description="No findings have been recorded for the selected project." />}
     <div className="flex items-center justify-between text-sm"><span>{formatNumber(findings.data?.pagination.totalItems ?? 0)} findings · {runs.data?.items.length ?? 0} recent runs</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={!findings.data?.pagination.hasPreviousPage} onClick={() => setPage((n) => n - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={!findings.data?.pagination.hasNextPage} onClick={() => setPage((n) => n + 1)}>Next</Button></div></div>
-    <SectionHeading title="Analysis runs" description="Pending, running, completed, and failed statuses reflect persisted backend run records." />
+    <SectionHeading title="Analysis runs" description="Pending, running, completed, and failed statuses reflect persisted backend run records. Spend Spike's scanned count covers cost-valued events in its current, previous, and fallback windows; it is not a finding count." />
     <Rows headers={["Detector", "Status", "Window", "Scanned", "Findings", "Failure"]} rows={(runs.data?.items ?? []).map((r) => [r.detectorType, r.status, `${formatDateTime(r.windowStart)} – ${formatDateTime(r.windowEnd)}`, formatNumber(r.recordsScanned), formatNumber(r.findingsCreated), r.error ?? "—"])} empty="No analysis runs." />
   </DataState>}</>;
 }
@@ -131,6 +141,13 @@ export function AlertsApiView() {
   const { loading: workspaceLoading, error: workspaceError } = useWorkspace();
   const ready = Boolean(organization && project && !workspaceLoading && !workspaceError);
   const alerts = useApiQuery<Page<Alert>>(ready ? `/organizations/${organization!.id}/alerts${queryString({ projectId: project!.id, page, limit: 25 })}` : null);
+  React.useEffect(() => {
+    if (!ready) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") alerts.reload();
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [ready, alerts.reload]);
   async function updateStatus(id: string, status: string) {
     try { await apiRequest(`/organizations/${organization!.id}/alerts/${id}/status`, { method: "PATCH", body: { status } }); alerts.reload(); toast.success("Alert updated"); }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : "Could not update alert"); }

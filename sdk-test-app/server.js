@@ -1,8 +1,14 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AclpGemini } from "./sdk.js";
+import {
+  SPEND_SPIKE_BASELINE_WAIT_MS,
+  SPEND_SPIKE_CALLS,
+  expandSpendSpikeSource,
+} from "./spend-spike-scenario.js";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const envPath = resolve(root, ".env");
@@ -14,6 +20,7 @@ if (existsSync(envPath)) {
 }
 
 const calls = [];
+const spendSpikeRuns = new Map();
 const sdk = new AclpGemini({
   apiKey: process.env.GEMINI_API_KEY,
   model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
@@ -54,12 +61,13 @@ async function body(req) {
 }
 
 async function doCall(featureId, prompt, sessionId, options = {}) {
-  const started = Date.now();
   try {
     const result = await sdk.complete({
       featureId,
       prompt,
-      sessionId,
+      sessionId: options.sessionId || sessionId,
+      operationId: options.operationId,
+      scenarioRunId: options.scenarioRunId,
       maxTokens: options.maxTokens ?? 350,
       status: options.status ?? "SUCCESS",
       occurredAt: options.occurredAt,
@@ -67,18 +75,7 @@ async function doCall(featureId, prompt, sessionId, options = {}) {
     });
     return result;
   } catch (error) {
-    // Record error event
-    const event = sdk.makeEvent({
-      featureId,
-      prompt,
-      sessionId,
-      status: options.status ?? "SUCCESS",
-      latencyMs: Date.now() - started,
-      inputTokens: options.inputTokens,
-      outputTokens: options.outputTokens,
-      totalTokens: options.totalTokens
-    });
-    sdk.emit(event);
+    // AclpGemini records and awaits delivery of the provider error event itself.
     throw error;
   }
 }
@@ -191,47 +188,101 @@ async function runScenario(input) {
   const scenario = input.scenario || "normal";
   const feature = input.feature || "resume.builder";
   const text = String(input.text || "Create a resume for a software engineer with five years of Node.js, React, PostgreSQL, and cloud experience.").slice(0, 280_000);
+  const scenarioRunId = input.scenarioRunId || randomUUID();
   // Use a shared session ID for scenarios that need correlation
-  const sessionId = input.useSharedSession ? `demo-shared-${Date.now()}` : `demo-${scenario}-${Date.now()}`;
+  const sessionId = input.useSharedSession ? `demo-shared-${Date.now()}` : `demo-${scenario}-${scenarioRunId}`;
   const outputs = [];
   const started = calls.length;
   const getDefaultAction = (feat) => actions[feat] || actions["resume.builder"];
-  const run = async (featureId, prompt, opts) => {
+  const run = async (featureId, prompt, opts = {}) => {
+    opts = { operationId: input.operationId, scenarioRunId, ...opts };
     const result = await doCall(featureId, prompt, sessionId, opts);
     outputs.push({ featureId, text: result.text, usage: result.usage, model: result.model });
     return result;
   };
+
+  if (scenario === "spend-spike" && input.scenarioRunId) {
+    const state = spendSpikeRuns.get(input.scenarioRunId);
+    if (!state) throw new Error("Spend Spike run was not found in this test-app process. Start a new scenario to create a fresh baseline.");
+    if (state.status !== "baseline_ready") throw new Error(`Spend Spike run is ${state.status}; no additional provider requests were sent.`);
+    const now = Date.now();
+    if (now < state.readyAt) {
+      return {
+        scenario,
+        scenarioRunId,
+        stage: "waiting_for_baseline_window",
+        readyAt: new Date(state.readyAt).toISOString(),
+        outputs,
+        newEvents: [],
+        baselineEventId: state.baselineEventId,
+        execution: { providerRequests: 0, providerSuccesses: 0, providerFailures: 0, ingestionAccepted: 0, ingestionDuplicates: 0, ingestionRejected: 0, deliveryUnconfirmed: 0, persistenceVerified: false, detectorRun: "not_run_by_test_app" },
+      };
+    }
+
+    state.status = "running";
+    const material = expandSpendSpikeSource(state.text);
+    try {
+      for (let i = 0; i < SPEND_SPIKE_CALLS; i++) {
+        const prompt = `${getDefaultAction(state.feature)(material)}\nProvide a detailed answer with examples, sections, and practical recommendations in a thorough manner.`;
+        await run(`spend-spike.${state.feature}`, prompt, { maxTokens: 800, sessionId: state.sessionId });
+      }
+      await sdk.flush();
+      state.status = "complete";
+    } catch (error) {
+      await sdk.flush();
+      state.status = "failed";
+      state.error = error.message || "Provider request failed";
+    }
+    const runEvents = uniqueEvents(calls.filter((event) => event.metadata?.scenarioRunId === scenarioRunId));
+    const runOutputs = outputs;
+    return {
+      scenario,
+      scenarioRunId,
+      stage: state.status,
+      baselineEventId: state.baselineEventId,
+      outputs: runOutputs,
+      newEvents: runEvents,
+      totals: totals(runEvents),
+      execution: summarizeExecution(runEvents, scenarioRunId),
+      error: state.error,
+    };
+  }
 
   if (scenario === "duplicate") {
     const prompt = getDefaultAction(feature)(text);
     await run(`${scenario}.${feature}`, prompt);
     await run(`${scenario}.${feature}`, prompt); // same prompt hash, separate event IDs
   } else if (scenario === "retry-loop") {
-    // Generate a coherent prompt for retry simulation
     const prompt = `${getDefaultAction(feature)(text)}\nRespond in one sentence.`;
-    // Make 5 rapid calls with same sessionId to trigger RETRY_LOOP detector
-    // The detector requires: 5+ calls < 2000ms apart, same session/model combination
     const sharedSessionId = `retry-loop-${Date.now()}`;
+    const operationId = input.operationId || `retry-operation-${Date.now()}`;
     for (let i = 0; i < 5; i++) {
-      // Emit synthetic events with rapid timing
-      const timestamp = new Date(Date.now() + i * 400); // 400ms intervals = under 2s threshold
-      const event = emitSyntheticEvent({
+      await run(`${scenario}.${feature}`, prompt, { sessionId: sharedSessionId, operationId });
+    }
+  } else if (scenario === "retry-loop-simulated") {
+    // Test-app-only controlled fixture: no Gemini calls or provider outcomes are represented.
+    // These events are explicitly labeled as simulated and traverse normal SDK ingestion.
+    const operationId = `simulated-retry-operation-${Date.now()}`;
+    const sharedSessionId = `simulated-retry-session-${Date.now()}`;
+    const statuses = ["RATE_LIMITED", "ERROR", "SUCCESS", "RATE_LIMITED", "SUCCESS"];
+    const prompt = "Test-only simulated retry-loop failure fixture.";
+    for (let i = 0; i < statuses.length; i++) {
+      const event = sdk.makeEvent({
         featureId: `${scenario}.${feature}`,
-        prompt,
+        prompt: `${prompt} attempt ${i + 1}`,
         sessionId: sharedSessionId,
-        model: "gemini-1.5-flash",
-        status: i === 0 ? "SUCCESS" : "ERROR", // First call succeeds, others fail (simulating retries)
-        inputTokens: 50,
-        outputTokens: 30,
-        latencyMs: 100,
-        occurredAt: timestamp.toISOString()
+        operationId,
+        scenarioRunId,
+        status: statuses[i],
+        model: process.env.GEMINI_MODEL || "gemini-3.1-flash-lite",
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        latencyMs: 0,
+        occurredAt: new Date(Date.now() + i * 100).toISOString(),
       });
-      outputs.push({
-        featureId: `${scenario}.${feature}`,
-        text: `Synthetic retry call ${i+1}`,
-        usage: { inputTokens: 50, outputTokens: 30, totalTokens: 80 },
-        model: "gemini-1.5-flash"
-      });
+      event.metadata = { ...event.metadata, simulated: true, simulationReason: "controlled retry-loop detector fixture; no Gemini call" };
+      await sdk.emit(event);
     }
   } else if (scenario === "unbounded-context") {
     const transcript = [];
@@ -244,31 +295,43 @@ async function runScenario(input) {
     const bulk = (text || "resume experience skills projects ").repeat(Math.ceil(260_000 / Math.max(1, text.length)));
     await run(`${scenario}.${feature}`, `${getDefaultAction("document.summarization")(text)}\n\nSource material:\n${bulk}`, { maxTokens: 120 });
   } else if (scenario === "spend-spike") {
-    // Prior window gets one small baseline event; current window gets four larger calls
-    // Detection compares current window against previous equal-length window
     const base = getDefaultAction("career.chatbot")("Reply with one brief career tip.");
-    // Emit baseline event 95 minutes ago (in a different window)
-    const baselineEvent = sdk.makeEvent({
-      featureId: `${scenario}.baseline`,
-      prompt: base,
-      sessionId: `spike-baseline-${Date.now()}`,
-      maxTokens: 20,
-      status: "SUCCESS",
-      inputTokens: 10,
-      outputTokens: 15,
-      latencyMs: 120,
-      occurredAt: new Date(Date.now() - 95 * 60_000).toISOString()
-    });
-    sdk.emit(baselineEvent);
-    calls.push({ ...baselineEvent, text: undefined });
-    // Current window gets 4 larger calls to trigger spike detection
-    for (let i = 0; i < 4; i++) {
-      await run(`${scenario}.${feature}`, `${getDefaultAction(feature)(text)}\nProvide a detailed answer with examples, sections, and practical recommendations in a thorough manner.`, {
-        maxTokens: 800,
-        inputTokens: 100 + i * 50,
-        outputTokens: 500 + i * 100
-      });
+    await run(`${scenario}.baseline`, base, { maxTokens: 20 });
+    await sdk.flush();
+    const baselineEvent = uniqueEvents(calls.slice(started)).find((event) => event.featureId === `${scenario}.baseline`);
+    if (!baselineEvent || !["accepted", "duplicate"].includes(baselineEvent.ingestion)) {
+      return {
+        scenario,
+        scenarioRunId,
+        stage: "baseline_delivery_failed",
+        outputs,
+        newEvents: uniqueEvents(calls.slice(started)),
+        execution: summarizeExecution(uniqueEvents(calls.slice(started)), scenarioRunId),
+        error: "The real baseline event was not accepted by ACLP ingestion; no burst requests were sent.",
+      };
     }
+    const readyAt = Date.parse(baselineEvent.occurredAt) + SPEND_SPIKE_BASELINE_WAIT_MS;
+    spendSpikeRuns.set(scenarioRunId, {
+      status: "baseline_ready",
+      baselineEventId: baselineEvent.eventId,
+      readyAt,
+      feature,
+      text,
+      sessionId,
+    });
+    const runEvents = uniqueEvents(calls.slice(started));
+    return {
+      scenario,
+      scenarioRunId,
+      stage: "baseline_ready",
+      readyAt: new Date(readyAt).toISOString(),
+      outputs,
+      newEvents: runEvents,
+      totals: totals(runEvents),
+      execution: summarizeExecution(runEvents, scenarioRunId),
+      detectorRun: "not_run_by_test_app",
+      persistenceVerified: false,
+    };
   } else if (scenario === "anomaly-detection") {
     // For anomaly detection, we need records with cost data for Isolation Forest
     // We'll use the run() function which goes through the SDK and gets cost estimation
@@ -328,7 +391,40 @@ async function runScenario(input) {
   }
 
   await sdk.flush();
-  return { scenario, outputs, newEvents: calls.slice(started), totals: totals(calls) };
+  const runEvents = uniqueEvents(calls.slice(started));
+  return {
+    scenario,
+    scenarioRunId,
+    stage: "complete",
+    outputs,
+    newEvents: runEvents,
+    totals: totals(runEvents),
+    execution: summarizeExecution(runEvents, scenarioRunId),
+    detectorRun: "not_run_by_test_app",
+    persistenceVerified: false,
+  };
+}
+
+function uniqueEvents(events) {
+  const byId = new Map();
+  for (const event of events) byId.set(event.eventId, event);
+  return [...byId.values()];
+}
+
+function summarizeExecution(events, scenarioRunId) {
+  const providerEvents = events.filter((event) => event.metadata?.scenarioRunId === scenarioRunId && !event.metadata?.simulated);
+  const ingestion = providerEvents.map((event) => event.ingestion || "unconfirmed");
+  return {
+    providerRequests: providerEvents.length,
+    providerSuccesses: providerEvents.filter((event) => event.status === "SUCCESS").length,
+    providerFailures: providerEvents.filter((event) => event.status !== "SUCCESS").length,
+    ingestionAccepted: ingestion.filter((state) => state === "accepted").length,
+    ingestionDuplicates: ingestion.filter((state) => state === "duplicate").length,
+    ingestionRejected: ingestion.filter((state) => state.startsWith("rejected") || state.startsWith("HTTP ")).length,
+    deliveryUnconfirmed: ingestion.filter((state) => state === "unconfirmed" || state === "not_configured" || state.startsWith("unreachable")).length,
+    persistenceVerified: false,
+    detectorRun: "not_run_by_test_app",
+  };
 }
 
 function totals(events) {
@@ -349,6 +445,7 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && path === "/api/status") return json(res, 200, { configured: Boolean(process.env.GEMINI_API_KEY), model: process.env.GEMINI_MODEL || "gemini-3.8-flash", ingestConfigured: Boolean(process.env.ACLP_API_KEY), totals: totals(calls) });
     if (req.method === "GET" && path === "/api/events") return json(res, 200, { events: calls.slice(-250).reverse(), totals: totals(calls) });
+    if (req.method === "GET" && path === "/api/health") return json(res, 200, { status: "ok" });
 
     // Chatbot routes
     if (req.method === "GET" && path === "/api/chat/session") {

@@ -5,6 +5,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { createHash } from "node:crypto";
+import { AclpGemini } from "../sdk.js";
 
 // Mock environment variables for testing
 process.env.GEMINI_API_KEY = "test-api-key";
@@ -151,6 +152,113 @@ describe("Telemetry Events", () => {
     assert.strictEqual(inputTokens, 150);
     assert.strictEqual(outputTokens, 250);
     assert.strictEqual(totalTokens, 400);
+  });
+});
+
+describe("ACLP ingestion contract", () => {
+  it("preserves operationId from a Gemini response through the emitted ingestion payload", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+    const outcomes = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, init });
+      if (String(url).startsWith("https://generativelanguage.googleapis.com/")) {
+        return new Response(JSON.stringify({
+          id: "gemini-request-1",
+          model: "gemini-3.1-flash-lite",
+          usage: { total_input_tokens: 4, total_output_tokens: 6, total_tokens: 10 },
+          steps: [{ type: "model_output", content: [{ text: "ok" }] }],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ success: true, data: { status: "accepted", usageRecordId: "usage-op-1" } }), { status: 201 });
+    };
+    try {
+      const adapter = new AclpGemini({ apiKey: "gemini-test", aclpApiKey: "aclp-test", onEvent: (event) => outcomes.push(event) });
+      const result = await adapter.complete({
+        featureId: "retry-loop.test",
+        prompt: "Retry contract test",
+        sessionId: "retry-session-1",
+        operationId: "logical-operation-1",
+        scenarioRunId: "scenario-run-1",
+      });
+      await adapter.flush();
+
+      assert.strictEqual(result.event.operationId, "logical-operation-1");
+      assert.strictEqual(result.event.metadata.scenarioRunId, "scenario-run-1");
+      assert.strictEqual(requests.length, 2);
+      assert.strictEqual(requests[1].url, "http://localhost:3000/api/v1/ingest/usage");
+      assert.strictEqual(JSON.parse(requests[1].init.body).operationId, "logical-operation-1");
+      assert.strictEqual(JSON.parse(requests[1].init.body).metadata.scenarioRunId, "scenario-run-1");
+      assert.strictEqual(outcomes.at(-1).ingestion, "accepted");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("preserves operationId on a provider failure and waits for its ingestion outcome", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+    const outcomes = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, init });
+      if (String(url).startsWith("https://generativelanguage.googleapis.com/")) {
+        return new Response(JSON.stringify({ error: { message: "controlled test failure" } }), { status: 429 });
+      }
+      return new Response(JSON.stringify({ success: true, data: { status: "accepted", usageRecordId: "usage-op-error" } }), { status: 201 });
+    };
+    try {
+      const adapter = new AclpGemini({ apiKey: "gemini-test", aclpApiKey: "aclp-test", onEvent: (event) => outcomes.push(event) });
+      await assert.rejects(adapter.complete({
+        featureId: "retry-loop.test",
+        prompt: "Controlled provider failure test",
+        sessionId: "retry-session-error",
+        operationId: "logical-operation-error",
+      }), /controlled test failure/);
+      await adapter.flush();
+
+      assert.strictEqual(requests.length, 2);
+      const sent = JSON.parse(requests[1].init.body);
+      assert.strictEqual(sent.operationId, "logical-operation-error");
+      assert.strictEqual(sent.status, "ERROR");
+      assert.strictEqual(outcomes.at(-1).ingestion, "accepted");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("posts to the backend batch-independent event route with project API key and reports acceptance", async () => {
+    const originalFetch = globalThis.fetch;
+    let request;
+    const outcomes = [];
+    globalThis.fetch = async (url, init) => {
+      request = { url, init };
+      return new Response(JSON.stringify({ success: true, data: { status: "accepted", usageRecordId: "usage-1" } }), { status: 201 });
+    };
+    try {
+      const adapter = new AclpGemini({ apiKey: "gemini-test", aclpApiKey: "aclp-test", onEvent: (event) => outcomes.push(event) });
+      const event = adapter.makeEvent({ featureId: "test.feature", prompt: "private", status: "SUCCESS" });
+      await adapter.emit(event);
+      assert.strictEqual(request.url, "http://localhost:3000/api/v1/ingest/usage");
+      assert.strictEqual(request.init.method, "POST");
+      assert.strictEqual(request.init.headers["x-api-key"], "aclp-test");
+      assert.strictEqual(JSON.parse(request.init.body).prompt, undefined);
+      assert.strictEqual(outcomes.at(-1).ingestion, "accepted");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("reports backend rejection even when ingestion returns HTTP 2xx", async () => {
+    const originalFetch = globalThis.fetch;
+    const outcomes = [];
+    globalThis.fetch = async () => new Response(JSON.stringify({ success: true, data: { status: "rejected", reason: "Event timestamp is too old." } }), { status: 201 });
+    try {
+      const adapter = new AclpGemini({ apiKey: "gemini-test", ingestUrl: "http://localhost:3000", aclpApiKey: "aclp-test", onEvent: (event) => outcomes.push(event) });
+      await assert.rejects(adapter.emit(adapter.makeEvent({ featureId: "test.feature", prompt: "private" })), /Event timestamp is too old/);
+      assert.strictEqual(outcomes.at(-1).ingestion, "ACLP ingestion rejected: Event timestamp is too old.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

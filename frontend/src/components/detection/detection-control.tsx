@@ -108,8 +108,11 @@ export function DetectionControl({
 
       onRunComplete?.(latestRun);
       if (latestRun.status === 'COMPLETED') {
+        const runSummary = latestRun.detectorType === 'SPEND_SPIKE'
+          ? `${latestRun.recordsScanned} cost-valued usage record(s) across current, previous, and fallback windows; ${latestRun.findingsCreated} finding(s) recorded.`
+          : `${latestRun.recordsScanned} usage record(s) scanned; ${latestRun.findingsCreated} finding(s) recorded.`;
         toast.success('Detection completed', {
-          description: `${latestRun.findingsCreated} finding(s) recorded.`,
+          description: runSummary,
         });
       } else if (latestRun.status === 'FAILED') {
         toast.error('Detection run failed', {
