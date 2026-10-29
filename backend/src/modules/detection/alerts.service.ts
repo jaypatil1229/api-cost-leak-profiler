@@ -51,34 +51,53 @@ export class AlertsService {
       issueKey: alertIssueKey,
     };
 
-    await this.prisma.$transaction(async (tx) => {
-      // Check if an alert with this issueKey already exists and is not resolved/dismissed
-      const existingAlert = await tx.alert.findFirst({
-        where: {
-          issueKey: alertIssueKey,
-          status: { in: ['OPEN', 'ACKNOWLEDGED'] },
-        },
-      });
-
-      if (existingAlert) {
-        // Update existing alert with new finding info, preserve status and acknowledgments
-        await tx.alert.update({
-          where: { id: existingAlert.id },
-          data: {
-            title: finding.title,
-            message: finding.description,
-            evidence: finding.evidence as Prisma.InputJsonValue,
-            estimatedRecoverableCost: finding.estimatedRecoverableCost,
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Check if an alert with this issueKey already exists and is not resolved/dismissed
+        const existingAlert = await tx.alert.findFirst({
+          where: {
+            issueKey: alertIssueKey,
+            status: { in: ['OPEN', 'ACKNOWLEDGED'] },
           },
         });
-        return;
-      }
 
-      // Create new alert - use type assertion to work around stale Prisma types
-      await tx.alert.create({
-        data: alertData as any,
+        if (existingAlert) {
+          // Update existing alert with new finding info, preserve status and acknowledgments
+          await tx.alert.update({
+            where: { id: existingAlert.id },
+            data: {
+              title: finding.title,
+              message: finding.description,
+              evidence: finding.evidence as Prisma.InputJsonValue,
+              estimatedRecoverableCost: finding.estimatedRecoverableCost,
+            },
+          });
+          return;
+        }
+
+        // Create new alert - use type assertion to work around stale Prisma types
+        await tx.alert.create({
+          data: alertData as any,
+        });
       });
-    });
+    } catch (error) {
+      // Concurrent calls may both observe no alert before inserting. The
+      // database's unique findingId constraint elects one winner; return that
+      // row without changing its lifecycle or hiding other database errors.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002' &&
+        (Array.isArray(error.meta?.target)
+          ? error.meta.target.includes('findingId')
+          : typeof error.meta?.target === 'string' &&
+            (error.meta.target.includes('findingId') ||
+              error.meta.target.includes('Alert_findingId_key')))
+      ) {
+        const winner = await this.prisma.alert.findUnique({ where: { findingId: finding.id } });
+        if (winner) return;
+      }
+      throw error;
+    }
 
     this.logger.log(`Alert created for finding ${finding.id} in org ${organizationId}`);
   }

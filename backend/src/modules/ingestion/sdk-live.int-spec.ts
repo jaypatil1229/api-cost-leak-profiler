@@ -1,13 +1,16 @@
 import { Prisma, PrismaClient, Provider } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { NestFactory } from '@nestjs/core';
 
+import { API_PREFIX } from '../../common/constants/app.constants';
+import { generateApiKey } from '../../common/utils/api-key.util';
+import { APP_CONFIG } from '../../config/config.module';
+import type { Configuration } from '../../config/configuration';
+import { AppModule } from '../../app.module';
+import { createValidationPipe } from '../../common/pipes/validation.pipe';
 import { AclpClient } from '../../../../sdk/src/client';
 
 const prisma = new PrismaClient();
-const baseUrl = process.env.ACLP_TEST_BASE_URL ?? 'http://127.0.0.1:3000';
-const apiKey = process.env.ACLP_TEST_API_KEY ?? '';
-const projectId = process.env.ACLP_TEST_PROJECT_ID ?? '';
-const organizationId = process.env.ACLP_TEST_ORG_ID ?? '';
 
 interface BatchResult {
   eventCount: number;
@@ -34,13 +37,61 @@ describe('official SDK live PostgreSQL ingestion', () => {
   const batchResults: BatchResult[] = [];
   let pricingId: string | undefined;
   let client: AclpClient | undefined;
+  let app: Awaited<ReturnType<typeof NestFactory.create>> | undefined;
+  let apiKey = '';
+  let projectId = '';
+  let organizationId = '';
+  let baseUrl = '';
+  let userId = '';
 
   beforeAll(async () => {
-    if (!apiKey || !projectId || !organizationId) {
-      throw new Error(
-        'Set ACLP_TEST_API_KEY, ACLP_TEST_PROJECT_ID, and ACLP_TEST_ORG_ID for the live test.',
-      );
-    }
+    app = await NestFactory.create(AppModule, { logger: false });
+    app.setGlobalPrefix(API_PREFIX);
+    app.useGlobalPipes(createValidationPipe());
+    const config = app.get<Configuration>(APP_CONFIG);
+    const user = await prisma.user.create({
+      data: {
+        email: `sdk-live-${randomUUID()}@example.test`,
+        name: 'SDK integration fixture',
+        passwordHash: 'not-used-for-authentication',
+      },
+    });
+    userId = user.id;
+    const organization = await prisma.organization.create({
+      data: {
+        name: 'SDK integration fixture',
+        slug: `sdk-${randomUUID()}`,
+        ownerUserId: user.id,
+      },
+    });
+    organizationId = organization.id;
+    const project = await prisma.project.create({
+      data: {
+        organizationId,
+        name: 'SDK integration fixture',
+        slug: `sdk-${randomUUID()}`,
+        createdByUserId: user.id,
+      },
+    });
+    projectId = project.id;
+    const generated = generateApiKey(config.auth.apiKeyHmacSecret);
+    apiKey = generated.plaintext;
+    await prisma.apiKey.create({
+      data: {
+        organizationId,
+        projectId,
+        name: 'SDK live integration fixture',
+        keyPrefix: generated.keyPrefix,
+        keyHash: generated.keyHash,
+        scopes: ['USAGE_WRITE'],
+        createdByUserId: user.id,
+      },
+    });
+    await app.listen(0, '127.0.0.1');
+    const address = app.getHttpServer().address();
+    if (!address || typeof address === 'string')
+      throw new Error('Test API did not bind to loopback.');
+    baseUrl = `http://127.0.0.1:${address.port}`;
     pricingId = (
       await prisma.modelPricing.create({
         data: {
@@ -81,7 +132,19 @@ describe('official SDK live PostgreSQL ingestion', () => {
       }
       if (pricingId) await prisma.modelPricing.delete({ where: { id: pricingId } });
     } finally {
-      await prisma.$disconnect();
+      try {
+        if (organizationId) await prisma.organization.deleteMany({ where: { id: organizationId } });
+      } finally {
+        try {
+          if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+        } finally {
+          try {
+            await app?.close();
+          } finally {
+            await prisma.$disconnect();
+          }
+        }
+      }
     }
   });
 

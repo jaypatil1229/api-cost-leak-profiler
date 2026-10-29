@@ -87,6 +87,28 @@ function run(command, args) {
   process.exitCode = result.status ?? 1;
 }
 
+function integrationPathArgs() {
+  const extra = process.argv.slice(3);
+  if (extra.length === 0) return [];
+  if (extra[0] !== '--runTestsByPath' || extra.length < 2) {
+    throw new Error('Integration filters must use --runTestsByPath with .int-spec.ts files.');
+  }
+
+  const paths = extra.slice(1).map((file) => path.resolve(backendDir, file));
+  for (const file of paths) {
+    const relative = path.relative(backendDir, file);
+    if (
+      relative.startsWith(`..${path.sep}`) ||
+      relative === '..' ||
+      path.isAbsolute(relative) ||
+      !file.endsWith('.int-spec.ts')
+    ) {
+      throw new Error('Integration test paths must be .int-spec.ts files inside backend/.');
+    }
+  }
+  return ['--runTestsByPath', ...paths];
+}
+
 async function main() {
   loadTestEnvironment();
   await verifyIdentity();
@@ -99,7 +121,12 @@ async function main() {
     run('prisma/build/index.js', ['migrate', 'deploy']);
   } else if (mode === 'integration') {
     process.env.RUN_POSTGRES_INTEGRATION = '1';
-    run('jest/bin/jest.js', ['--selectProjects', 'integration', '--runInBand']);
+    run('jest/bin/jest.js', [
+      '--selectProjects',
+      'integration',
+      '--runInBand',
+      ...integrationPathArgs(),
+    ]);
   } else {
     throw new Error('Usage: safe-test-db.cjs <verify|migrate|integration>');
   }
