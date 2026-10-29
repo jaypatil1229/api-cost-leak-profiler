@@ -51,27 +51,34 @@ export class AlertsService {
       issueKey: alertIssueKey,
     };
 
+    let alertAction: 'created' | 'refreshed' = 'created';
     try {
       await this.prisma.$transaction(async (tx) => {
         // Check if an alert with this issueKey already exists and is not resolved/dismissed
         const existingAlert = await tx.alert.findFirst({
           where: {
+            organizationId,
+            projectId: finding.projectId,
             issueKey: alertIssueKey,
             status: { in: ['OPEN', 'ACKNOWLEDGED'] },
           },
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
         });
 
         if (existingAlert) {
-          // Update existing alert with new finding info, preserve status and acknowledgments
+          // Keep a deduplicated alert linked to the most recent finding while
+          // preserving its lifecycle state and acknowledgment metadata.
           await tx.alert.update({
             where: { id: existingAlert.id },
             data: {
+              findingId: finding.id,
               title: finding.title,
               message: finding.description,
               evidence: finding.evidence as Prisma.InputJsonValue,
               estimatedRecoverableCost: finding.estimatedRecoverableCost,
             },
           });
+          alertAction = 'refreshed';
           return;
         }
 
@@ -99,7 +106,7 @@ export class AlertsService {
       throw error;
     }
 
-    this.logger.log(`Alert created for finding ${finding.id} in org ${organizationId}`);
+    this.logger.log(`Alert ${alertAction} for finding ${finding.id} in org ${organizationId}`);
   }
 
   async listAlerts(
@@ -120,7 +127,13 @@ export class AlertsService {
     const [items, total] = await Promise.all([
       this.prisma.alert.findMany({
         where,
-        orderBy: { createdAt: query.sortOrder ?? 'desc' },
+        // A deduplicated alert can be refreshed by a later detection run. Sort
+        // by that activity so current alerts do not remain buried by their
+        // original creation timestamp.
+        orderBy: [
+          { updatedAt: query.sortOrder ?? 'desc' },
+          { createdAt: query.sortOrder ?? 'desc' },
+        ],
         skip: pagination.skip,
         take: pagination.take,
       }),

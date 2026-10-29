@@ -53,9 +53,12 @@ describe('AlertsService idempotent finding alerts', () => {
     await service.createAlertFromFinding('org-1', finding);
     expect(tx.alert.findFirst).toHaveBeenCalledWith({
       where: {
+        organizationId: 'org-1',
+        projectId: finding.projectId,
         issueKey: 'finding-1',
         status: { in: ['OPEN', 'ACKNOWLEDGED'] },
       },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
     });
     expect(tx.alert.create).toHaveBeenCalledTimes(1);
     const createCall = tx.alert.create.mock.calls[0][0];
@@ -70,6 +73,7 @@ describe('AlertsService idempotent finding alerts', () => {
     await service.createAlertFromFinding('org-1', finding);
     expect(tx.alert.update).toHaveBeenCalledTimes(1);
     const updateCall = tx.alert.update.mock.calls[0][0];
+    expect(updateCall.data.findingId).toBe(finding.id);
     expect(updateCall.data.message).toBe(finding.description);
     expect(updateCall.data.title).toBe(finding.title);
     // Status should not be set during update (lifecycle preserved)
@@ -82,9 +86,12 @@ describe('AlertsService idempotent finding alerts', () => {
     await service.createAlertFromFinding('org-1', finding);
     expect(tx.alert.findFirst).toHaveBeenCalledWith({
       where: {
+        organizationId: 'org-1',
+        projectId: finding.projectId,
         issueKey: 'spend-spike:project-1:150',
         status: { in: ['OPEN', 'ACKNOWLEDGED'] },
       },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
     });
     const createCall = tx.alert.create.mock.calls[0][0];
     expect(createCall.data.issueKey).toBe('spend-spike:project-1:150');
@@ -113,14 +120,43 @@ describe('AlertsService idempotent finding alerts', () => {
   });
 
   it('updates acknowledged alerts to reflect new findings', async () => {
-    const { service, tx, finding } = setup();
+    const { service, tx, finding } = setup({ id: 'finding-new' });
 
-    tx.alert.findFirst.mockResolvedValue({ id: 'alert-acknowledged', status: 'ACKNOWLEDGED', issueKey: 'finding-1' });
+    tx.alert.findFirst.mockResolvedValue({
+      id: 'alert-acknowledged',
+      findingId: 'finding-old',
+      status: 'ACKNOWLEDGED',
+      issueKey: 'finding-1',
+    });
     await service.createAlertFromFinding('org-1', finding);
     expect(tx.alert.update).toHaveBeenCalledTimes(1);
     const updateCall = tx.alert.update.mock.calls[0][0];
+    expect(updateCall.data.findingId).toBe('finding-new');
     expect(updateCall.data.title).toBe(finding.title);
     expect(updateCall.data.message).toBe(finding.description);
+    expect(updateCall.data).not.toHaveProperty('status');
+  });
+
+  it('sorts refreshed alerts ahead of older untouched alerts', async () => {
+    const prisma = {
+      alert: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+    const service = new AlertsService(
+      prisma as never,
+      { limits: { defaultPageSize: 25, maxPageSize: 100 } } as never,
+    );
+
+    await service.listAlerts('org-1', { projectId: 'project-1' } as never);
+
+    expect(prisma.alert.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: 'org-1', projectId: 'project-1' },
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      }),
+    );
   });
 
   it('scopes alert reads and updates to the authenticated organization', async () => {

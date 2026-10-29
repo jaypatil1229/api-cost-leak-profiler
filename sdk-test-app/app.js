@@ -1,13 +1,14 @@
 const $ = (id) => document.getElementById(id);
 const features = $("feature");
 const scenario = $("scenario");
+$("runScenario").dataset.label = $("runScenario").textContent.trim();
 const scenarioHelp = {
   duplicate: "Sends the exact same feature prompt twice with distinct event IDs. The shared prompt hash lets the duplicate detector group them.",
-  "retry-loop": "Makes five rapid calls with the same prompt, model, and session. This produces the repeated-call pattern the current detector identifies as a possible retry loop.",
+  "retry-loop": "Sends five separate real Gemini requests with the same prompt, model, session, and operation ID. The wrapper does not expose provider-internal retries. A finding requires five unique events, at least two genuine ERROR/TIMEOUT/RATE_LIMITED outcomes, and no adjacent gap over 2 seconds; successful calls alone correctly produce no finding. This app reports delivery but does not verify persistence or run detection.",
   "retry-loop-simulated": "TEST ONLY: sends five explicitly simulated retry outcomes through ACLP ingestion; it makes no Gemini calls and does not represent provider failures.",
   "unbounded-context": "Makes five chat calls while retaining an increasingly long transcript. Input token counts should rise across one session.",
   "oversized-prompt": "Expands the source material to roughly 260k characters (about 50k+ tokens). This can cost more and may exceed a model's context limit.",
-  "spend-spike": "Two stages: one real, small baseline call now, then ten large real Gemini requests after 15 minutes so the default 10-minute automatic detector can compare adjacent windows. The current burst needs >3x spend and >$0.10 excess; these requests can incur about $0.20 at the current model's pricing. This app reports provider and ingestion outcomes, but does not verify database persistence or run detection.",
+  "spend-spike": "Two stages: one real, small baseline call now, then ten large real Gemini requests after 15 minutes. The test app keeps the baseline run across server restarts and offers an explicit fresh-baseline recovery if the run is missing or expired. This app reports provider and ingestion outcomes but does not verify database persistence or run detection.",
   "anomaly-detection": "Generates a baseline of normal usage, then adds anomalous patterns (unusually large requests, extreme costs, outlier token counts). Requires Python analytics service for Isolation Forest detection."
 };
 scenario.addEventListener("change", () => { $("scenarioHelp").textContent = scenarioHelp[scenario.value]; });
@@ -15,14 +16,32 @@ scenario.dispatchEvent(new Event("change"));
 
 const spendSpikeStorageKey = "aclp-spend-spike-run";
 let activeSpendSpike = null;
-try { activeSpendSpike = JSON.parse(sessionStorage.getItem(spendSpikeStorageKey) || "null"); } catch { activeSpendSpike = null; }
+let spendSpikeRecoveryRequired = false;
+try {
+  const storedRun = localStorage.getItem(spendSpikeStorageKey) || sessionStorage.getItem(spendSpikeStorageKey);
+  activeSpendSpike = JSON.parse(storedRun || "null");
+} catch { activeSpendSpike = null; }
 let spendSpikeTimer = null;
 let scenarioRequestRunning = false;
 
 function number(value) { return Number(value || 0).toLocaleString(); }
 function updateSpendSpikeButton(button) {
   if (scenarioRequestRunning) return;
-  if (!activeSpendSpike || scenario.value !== "spend-spike") {
+  if (scenario.value !== "spend-spike") {
+    button.disabled = false;
+    button.textContent = button.dataset.label || "Run selected scenario ↗";
+    if (spendSpikeTimer) clearInterval(spendSpikeTimer);
+    spendSpikeTimer = null;
+    return;
+  }
+  if (spendSpikeRecoveryRequired) {
+    button.disabled = false;
+    button.textContent = "Start fresh baseline";
+    if (spendSpikeTimer) clearInterval(spendSpikeTimer);
+    spendSpikeTimer = null;
+    return;
+  }
+  if (!activeSpendSpike) {
     button.disabled = false;
     button.textContent = button.dataset.label || "Run selected scenario ↗";
     if (spendSpikeTimer) clearInterval(spendSpikeTimer);
@@ -56,7 +75,17 @@ function summarizeStages(result) {
     return `Baseline event ${result.baselineEventId} was accepted. No Gemini request was made; wait until ${new Date(result.readyAt).toLocaleTimeString()} local time. Persistence is not independently checked; detector has not run.`;
   }
   const generation = result.stage === "complete" ? "Scenario generation complete" : `Scenario generation ${result.stage}`;
+  if (result.scenario === "retry-loop") {
+    return `${generation} · ${provider} · ACLP delivery ${delivery}. Observed ${e.providerFailures} genuine provider failure(s); detector execution and persistence verification are separate steps.`;
+  }
   return `${generation} · ${provider} · ACLP delivery ${delivery}. Acceptance is not a database persistence check; the SDK test app does not run detection.`;
+}
+
+function safeErrorText(value) {
+  return String(value || "")
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, "[redacted]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted]")
+    .slice(0, 500);
 }
 
 function renderScenarioEvents(events = []) {
@@ -79,6 +108,52 @@ async function status() {
   pill.textContent = s.configured ? (s.ingestConfigured ? `Gemini · ACLP connected · ${s.model}` : `Gemini · ACLP not configured · ${s.model}`) : "Add Gemini key in .env";
   pill.className = `pill ${s.configured && s.ingestConfigured ? "good" : s.configured ? "" : "bad"}`;
 }
+
+async function restoreSpendSpikeRun() {
+  let stored = activeSpendSpike;
+  if (stored?.scenarioRunId) {
+    try {
+      const response = await fetch(`/api/spend-spike/runs/${encodeURIComponent(stored.scenarioRunId)}`);
+      const result = await response.json();
+      if (response.ok && result.run?.stage === "baseline_ready") {
+        activeSpendSpike = { scenarioRunId: result.run.scenarioRunId, readyAt: result.run.readyAt };
+        localStorage.setItem(spendSpikeStorageKey, JSON.stringify(activeSpendSpike));
+        sessionStorage.removeItem(spendSpikeStorageKey);
+      } else {
+        activeSpendSpike = null;
+        localStorage.removeItem(spendSpikeStorageKey);
+        sessionStorage.removeItem(spendSpikeStorageKey);
+        spendSpikeRecoveryRequired = true;
+        const reason = result.run?.stage || "missing or expired";
+        $("output").textContent = `The saved Spend Spike run is ${reason} and cannot be continued. This recovery check made no Gemini calls. Start a fresh Spend Spike scenario to create a new baseline.`;
+        $("resultMeta").textContent = "Recovery required · provider calls during recovery: 0 · detection has not run.";
+      }
+    } catch {
+      // Retry using the server's active-run index below.
+    }
+  }
+
+  if (!activeSpendSpike) {
+    try {
+      const response = await fetch("/api/spend-spike/runs/active");
+      const result = await response.json();
+      if (response.ok && result.run?.stage === "baseline_ready") {
+        activeSpendSpike = { scenarioRunId: result.run.scenarioRunId, readyAt: result.run.readyAt };
+        localStorage.setItem(spendSpikeStorageKey, JSON.stringify(activeSpendSpike));
+        sessionStorage.removeItem(spendSpikeStorageKey);
+        if (spendSpikeRecoveryRequired) {
+          $("output").textContent = `Restored active Spend Spike baseline ${result.run.baselineEventId}. No Gemini request was made during recovery.`;
+          $("resultMeta").textContent = "Saved run restored · provider calls: 0 · persistence and detection remain separate checks.";
+        }
+        spendSpikeRecoveryRequired = false;
+      }
+    } catch {
+      // The scenario can still be started manually if the state lookup is unavailable.
+    }
+  }
+  updateSpendSpikeButton($("runScenario"));
+}
+
 async function run(button, body) {
   scenarioRequestRunning = true;
   button.disabled = true; button.dataset.label ||= button.textContent; button.textContent = "Calling Gemini…";
@@ -89,20 +164,34 @@ async function run(button, body) {
       : body;
     const response = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
     const result = await response.json();
+    if (!response.ok && ["SPEND_SPIKE_RUN_UNAVAILABLE", "SPEND_SPIKE_RUN_NOT_RESUMABLE"].includes(result.code)) {
+      activeSpendSpike = null;
+      localStorage.removeItem(spendSpikeStorageKey);
+      sessionStorage.removeItem(spendSpikeStorageKey);
+      spendSpikeRecoveryRequired = true;
+      $("output").textContent = result.error || "The baseline is unavailable. No Gemini requests were sent.";
+      $("resultMeta").textContent = "Recovery required · provider calls: 0 · click Start fresh baseline to continue.";
+      return;
+    }
     if (!response.ok) throw new Error(result.error || "Request failed");
     if (result.scenario === "spend-spike" && result.stage === "baseline_ready") {
       activeSpendSpike = { scenarioRunId: result.scenarioRunId, readyAt: result.readyAt };
-      sessionStorage.setItem(spendSpikeStorageKey, JSON.stringify(activeSpendSpike));
+      spendSpikeRecoveryRequired = false;
+      localStorage.setItem(spendSpikeStorageKey, JSON.stringify(activeSpendSpike));
+      sessionStorage.removeItem(spendSpikeStorageKey);
     } else if (result.scenario === "spend-spike" && ["complete", "failed", "baseline_delivery_failed"].includes(result.stage)) {
       activeSpendSpike = null;
+      spendSpikeRecoveryRequired = false;
+      localStorage.removeItem(spendSpikeStorageKey);
       sessionStorage.removeItem(spendSpikeStorageKey);
     }
     const outputText = (result.outputs || []).map((o,i) => `Gemini response ${i+1} · ${o.featureId} · ${number(o.usage.totalTokens)} provider-reported tokens\n${String(o.text).slice(0, 700)}`).join("\n\n────────────────────────\n\n");
+    const providerError = result.error ? `Provider error details: ${safeErrorText(result.error)}\n\n` : "";
     const eventsText = renderScenarioEvents(result.newEvents);
-    $("output").textContent = `Scenario run ID: ${result.scenarioRunId || "not assigned"}\nStage: ${result.stage || "complete"}\n\n${outputText}\n\nACLP event outcomes:\n${eventsText}`;
+    $("output").textContent = `Scenario run ID: ${result.scenarioRunId || "not assigned"}\nStage: ${result.stage || "complete"}\n\n${providerError}${outputText}\n\nACLP event outcomes:\n${eventsText}`;
     $("resultMeta").textContent = summarizeStages(result);
     await refresh();
-  } catch (error) { $("output").textContent = error.message; $("resultMeta").textContent = "Scenario request failed; inspect event delivery separately."; }
+  } catch (error) { $("output").textContent = safeErrorText(error.message); $("resultMeta").textContent = "Provider or scenario request failed. The event list refreshes independently so persisted delivery outcomes remain visible."; await refresh(); }
   finally {
     scenarioRequestRunning = false;
     button.disabled = false;
@@ -114,7 +203,7 @@ $("runFeature").addEventListener("click", (event) => run(event.currentTarget, { 
 $("runScenario").addEventListener("click", (event) => run(event.currentTarget, { feature: features.value, text: $("input").value, scenario: scenario.value }));
 $("refresh").addEventListener("click", refresh);
 
-status(); refresh(); setInterval(refresh, 5000);
+status(); refresh(); void restoreSpendSpikeRun(); setInterval(refresh, 5000);
 
 // Chatbot functionality
 let chatSessionId = null;

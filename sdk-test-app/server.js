@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AclpGemini } from "./sdk.js";
+import { SpendSpikeRunStore, SPEND_SPIKE_RUN_TTL_MS } from "./spend-spike-run-store.js";
 import {
   SPEND_SPIKE_BASELINE_WAIT_MS,
   SPEND_SPIKE_CALLS,
@@ -20,7 +21,7 @@ if (existsSync(envPath)) {
 }
 
 const calls = [];
-const spendSpikeRuns = new Map();
+const spendSpikeRuns = new SpendSpikeRunStore();
 const sdk = new AclpGemini({
   apiKey: process.env.GEMINI_API_KEY,
   model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
@@ -33,6 +34,24 @@ const sdk = new AclpGemini({
     } else calls.push({ ...event, text: undefined });
   },
 });
+
+class ScenarioRunError extends Error {
+  constructor(code, message, statusCode = 409) {
+    super(message);
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+function publicSpendSpikeRun(run) {
+  return {
+    scenarioRunId: run.scenarioRunId,
+    stage: run.status,
+    baselineEventId: run.baselineEventId,
+    readyAt: new Date(run.readyAt).toISOString(),
+    expiresAt: new Date(run.expiresAt).toISOString(),
+  };
+}
 
 const actions = {
   "resume.builder": (text) => `Create a concise, polished resume draft from these notes. Use clear sections and do not invent credentials.\n\n${text}`,
@@ -203,8 +222,24 @@ async function runScenario(input) {
 
   if (scenario === "spend-spike" && input.scenarioRunId) {
     const state = spendSpikeRuns.get(input.scenarioRunId);
-    if (!state) throw new Error("Spend Spike run was not found in this test-app process. Start a new scenario to create a fresh baseline.");
-    if (state.status !== "baseline_ready") throw new Error(`Spend Spike run is ${state.status}; no additional provider requests were sent.`);
+    if (!state) {
+      throw new ScenarioRunError(
+        "SPEND_SPIKE_RUN_UNAVAILABLE",
+        "This Spend Spike baseline is missing or expired. This request made no Gemini calls. Start a fresh Spend Spike scenario to create a new baseline.",
+      );
+    }
+    if (state.status === "running") {
+      throw new ScenarioRunError(
+        "SPEND_SPIKE_RUN_IN_PROGRESS",
+        "This Spend Spike burst is already running. No additional Gemini requests were started.",
+      );
+    }
+    if (state.status !== "baseline_ready") {
+      throw new ScenarioRunError(
+        "SPEND_SPIKE_RUN_NOT_RESUMABLE",
+        `This Spend Spike run is ${state.status} and cannot be resumed safely. This request started no Gemini calls. Start a fresh Spend Spike scenario to create a new baseline.`,
+      );
+    }
     const now = Date.now();
     if (now < state.readyAt) {
       return {
@@ -219,32 +254,33 @@ async function runScenario(input) {
       };
     }
 
-    state.status = "running";
-    const material = expandSpendSpikeSource(state.text);
+    spendSpikeRuns.update(scenarioRunId, { status: "running" });
+    const material = expandSpendSpikeSource();
+    let providerError;
     try {
       for (let i = 0; i < SPEND_SPIKE_CALLS; i++) {
         const prompt = `${getDefaultAction(state.feature)(material)}\nProvide a detailed answer with examples, sections, and practical recommendations in a thorough manner.`;
         await run(`spend-spike.${state.feature}`, prompt, { maxTokens: 800, sessionId: state.sessionId });
       }
       await sdk.flush();
-      state.status = "complete";
+      spendSpikeRuns.update(scenarioRunId, { status: "complete" });
     } catch (error) {
       await sdk.flush();
-      state.status = "failed";
-      state.error = error.message || "Provider request failed";
+      spendSpikeRuns.update(scenarioRunId, { status: "failed" });
+      providerError = error.message || "Provider request failed";
     }
     const runEvents = uniqueEvents(calls.filter((event) => event.metadata?.scenarioRunId === scenarioRunId));
     const runOutputs = outputs;
     return {
       scenario,
       scenarioRunId,
-      stage: state.status,
+      stage: spendSpikeRuns.get(scenarioRunId)?.status ?? "failed",
       baselineEventId: state.baselineEventId,
       outputs: runOutputs,
       newEvents: runEvents,
       totals: totals(runEvents),
       execution: summarizeExecution(runEvents, scenarioRunId),
-      error: state.error,
+      error: providerError,
     };
   }
 
@@ -311,12 +347,15 @@ async function runScenario(input) {
       };
     }
     const readyAt = Date.parse(baselineEvent.occurredAt) + SPEND_SPIKE_BASELINE_WAIT_MS;
-    spendSpikeRuns.set(scenarioRunId, {
+    const now = Date.now();
+    spendSpikeRuns.put({
+      scenarioRunId,
       status: "baseline_ready",
       baselineEventId: baselineEvent.eventId,
       readyAt,
+      createdAt: now,
+      expiresAt: now + SPEND_SPIKE_RUN_TTL_MS,
       feature,
-      text,
       sessionId,
     });
     const runEvents = uniqueEvents(calls.slice(started));
@@ -446,6 +485,17 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && path === "/api/status") return json(res, 200, { configured: Boolean(process.env.GEMINI_API_KEY), model: process.env.GEMINI_MODEL || "gemini-3.8-flash", ingestConfigured: Boolean(process.env.ACLP_API_KEY), totals: totals(calls) });
     if (req.method === "GET" && path === "/api/events") return json(res, 200, { events: calls.slice(-250).reverse(), totals: totals(calls) });
     if (req.method === "GET" && path === "/api/health") return json(res, 200, { status: "ok" });
+    if (req.method === "GET" && path === "/api/spend-spike/runs/active") {
+      const active = spendSpikeRuns.listActive()[0] ?? null;
+      return json(res, 200, { run: active ? publicSpendSpikeRun(active) : null });
+    }
+    const spendSpikeRunPrefix = "/api/spend-spike/runs/";
+    if (req.method === "GET" && path.startsWith(spendSpikeRunPrefix)) {
+      const runId = decodeURIComponent(path.slice(spendSpikeRunPrefix.length));
+      const run = spendSpikeRuns.get(runId);
+      if (!run) return json(res, 404, { code: "SPEND_SPIKE_RUN_UNAVAILABLE", error: "This Spend Spike baseline is missing or expired. This check made no Gemini calls. Start a fresh Spend Spike scenario to create a new baseline." });
+      return json(res, 200, { run: publicSpendSpikeRun(run) });
+    }
 
     // Chatbot routes
     if (req.method === "GET" && path === "/api/chat/session") {
@@ -510,6 +560,9 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && asset) { const data = readFileSync(resolve(root, asset)); res.writeHead(200, { "Content-Type": asset.endsWith(".js") ? "text/javascript" : "text/css" }); return res.end(data); }
     return json(res, 404, { error: "Not found" });
   } catch (error) {
+    if (error instanceof ScenarioRunError) {
+      return json(res, error.statusCode, { code: error.code, error: error.message });
+    }
     return json(res, 400, { error: error.message || "Request failed" });
   }
 });

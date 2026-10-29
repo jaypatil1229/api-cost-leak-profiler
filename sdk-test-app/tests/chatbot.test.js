@@ -202,7 +202,7 @@ describe("ACLP ingestion contract", () => {
     globalThis.fetch = async (url, init) => {
       requests.push({ url, init });
       if (String(url).startsWith("https://generativelanguage.googleapis.com/")) {
-        return new Response(JSON.stringify({ error: { message: "controlled test failure" } }), { status: 429 });
+        return new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "controlled test failure" } }), { status: 429 });
       }
       return new Response(JSON.stringify({ success: true, data: { status: "accepted", usageRecordId: "usage-op-error" } }), { status: 201 });
     };
@@ -220,6 +220,9 @@ describe("ACLP ingestion contract", () => {
       const sent = JSON.parse(requests[1].init.body);
       assert.strictEqual(sent.operationId, "logical-operation-error");
       assert.strictEqual(sent.status, "ERROR");
+      assert.strictEqual(sent.errorCode, "GEMINI_HTTP_429_RESOURCE_EXHAUSTED");
+      assert.strictEqual(JSON.stringify(sent.metadata).includes("controlled test failure"), false);
+      assert.strictEqual(outcomes[0].errorCode, "GEMINI_HTTP_429_RESOURCE_EXHAUSTED");
       assert.strictEqual(outcomes.at(-1).ingestion, "accepted");
     } finally {
       globalThis.fetch = originalFetch;

@@ -31,7 +31,16 @@ export class AclpGemini {
       if (!response.ok) throw new Error(result.error?.message || `Gemini returned HTTP ${response.status}`);
     } catch (error) {
       // Failed provider calls still carry zero token usage; the ACLP event records the failure.
-      const event = this.makeEvent({ featureId, prompt, sessionId, operationId, scenarioRunId, customerUserId, status: "ERROR", latencyMs: Date.now() - started, occurredAt });
+      const providerCode = result?.error?.status || result?.error?.code;
+      const rawErrorCode = response
+        ? `GEMINI_HTTP_${response.status}${providerCode ? `_${providerCode}` : ""}`
+        : error?.code
+          ? `GEMINI_${error.code}`
+          : null;
+      const errorCode = rawErrorCode
+        ? String(rawErrorCode).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64)
+        : null;
+      const event = this.makeEvent({ featureId, prompt, sessionId, operationId, scenarioRunId, customerUserId, status: "ERROR", errorCode, latencyMs: Date.now() - started, occurredAt });
       if (!deferEmit) {
         try {
           await this.emit(event);
@@ -67,7 +76,7 @@ export class AclpGemini {
     };
   }
 
-  makeEvent({ featureId, prompt, sessionId, operationId, scenarioRunId, customerUserId, status, model = this.model, inputTokens = 0, outputTokens = 0, totalTokens = 0, latencyMs = 0, externalRequestId, occurredAt }) {
+  makeEvent({ featureId, prompt, sessionId, operationId, scenarioRunId, customerUserId, status, errorCode = null, model = this.model, inputTokens = 0, outputTokens = 0, totalTokens = 0, latencyMs = 0, externalRequestId, occurredAt }) {
     return {
       eventId: `sdkdemo_${randomUUID()}`,
       provider: "GEMINI",
@@ -78,6 +87,7 @@ export class AclpGemini {
       totalTokens,
       latencyMs,
       status,
+      errorCode,
       featureId,
       customerUserId,
       sessionId,
