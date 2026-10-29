@@ -248,7 +248,7 @@ export class DetectionService {
       });
 
       this.logger.log(
-        `Detection run ${runId} completed: ${result.recordsScanned} records scanned, ${result.findings.length} findings.`,
+        `Detection run ${runId} completed: ${result.recordsScanned} records examined, ${result.findings.length} detector result(s), ${persisted.findingsCreated} new finding row(s) created.`,
       );
     } catch (error: any) {
       await this.prisma.detectionRun

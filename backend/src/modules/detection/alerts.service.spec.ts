@@ -58,7 +58,7 @@ describe('AlertsService idempotent finding alerts', () => {
         issueKey: 'finding-1',
         status: { in: ['OPEN', 'ACKNOWLEDGED'] },
       },
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
     });
     expect(tx.alert.create).toHaveBeenCalledTimes(1);
     const createCall = tx.alert.create.mock.calls[0][0];
@@ -91,7 +91,7 @@ describe('AlertsService idempotent finding alerts', () => {
         issueKey: 'spend-spike:project-1:150',
         status: { in: ['OPEN', 'ACKNOWLEDGED'] },
       },
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
     });
     const createCall = tx.alert.create.mock.calls[0][0];
     expect(createCall.data.issueKey).toBe('spend-spike:project-1:150');
@@ -154,7 +154,63 @@ describe('AlertsService idempotent finding alerts', () => {
     expect(prisma.alert.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { organizationId: 'org-1', projectId: 'project-1' },
-        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      }),
+    );
+  });
+
+  it('applies severity sort before pagination with stable timestamp and ID tie-breaks', async () => {
+    const prisma = {
+      alert: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+    const service = new AlertsService(
+      prisma as never,
+      { limits: { defaultPageSize: 25, maxPageSize: 100 } } as never,
+    );
+
+    await service.listAlerts('org-1', {
+      projectId: 'project-1',
+      sortBy: 'severity',
+      page: 2,
+      limit: 10,
+    } as never);
+
+    expect(prisma.alert.findMany).toHaveBeenCalledWith({
+      where: { organizationId: 'org-1', projectId: 'project-1' },
+      orderBy: [
+        { severity: 'desc' },
+        { updatedAt: 'desc' },
+        { createdAt: 'desc' },
+        { id: 'desc' },
+      ],
+      skip: 10,
+      take: 10,
+    });
+  });
+
+  it('supports creation-time sorting and stable ascending ties', async () => {
+    const prisma = {
+      alert: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+    const service = new AlertsService(
+      prisma as never,
+      { limits: { defaultPageSize: 25, maxPageSize: 100 } } as never,
+    );
+
+    await service.listAlerts('org-1', {
+      sortBy: 'createdAt',
+      sortOrder: 'asc',
+    } as never);
+
+    expect(prisma.alert.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ createdAt: 'asc' }, { updatedAt: 'asc' }, { id: 'asc' }],
       }),
     );
   });

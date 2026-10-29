@@ -203,6 +203,11 @@ export class FindingResponseDto {
 // ── Alert DTOs ─────────────────────────────────────────────────────
 
 export class AlertQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ enum: ['updatedAt', 'createdAt', 'severity'], default: 'updatedAt' })
+  @IsOptional()
+  @IsIn(['updatedAt', 'createdAt', 'severity'])
+  sortBy?: 'updatedAt' | 'createdAt' | 'severity';
+
   @ApiPropertyOptional({ enum: AlertCategory })
   @IsOptional()
   @IsEnum(AlertCategory)

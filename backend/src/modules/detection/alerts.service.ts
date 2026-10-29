@@ -62,7 +62,7 @@ export class AlertsService {
             issueKey: alertIssueKey,
             status: { in: ['OPEN', 'ACKNOWLEDGED'] },
           },
-          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         });
 
         if (existingAlert) {
@@ -124,16 +124,33 @@ export class AlertsService {
     if (query.severity) where.severity = query.severity;
     if (query.projectId) where.projectId = query.projectId;
 
+    const direction = query.sortOrder ?? 'desc';
+    const orderBy: Prisma.AlertOrderByWithRelationInput[] =
+      query.sortBy === 'severity'
+        ? [
+            { severity: direction },
+            { updatedAt: 'desc' },
+            { createdAt: 'desc' },
+            { id: 'desc' },
+          ]
+        : query.sortBy === 'createdAt'
+          ? [
+              { createdAt: direction },
+              { updatedAt: direction },
+              { id: direction },
+            ]
+          : [
+              { updatedAt: direction },
+              { createdAt: direction },
+              { id: direction },
+            ];
+
     const [items, total] = await Promise.all([
       this.prisma.alert.findMany({
         where,
-        // A deduplicated alert can be refreshed by a later detection run. Sort
-        // by that activity so current alerts do not remain buried by their
-        // original creation timestamp.
-        orderBy: [
-          { updatedAt: query.sortOrder ?? 'desc' },
-          { createdAt: query.sortOrder ?? 'desc' },
-        ],
+        // Always include a unique final key so records with equal timestamps
+        // cannot drift between pages on repeated requests.
+        orderBy,
         skip: pagination.skip,
         take: pagination.take,
       }),

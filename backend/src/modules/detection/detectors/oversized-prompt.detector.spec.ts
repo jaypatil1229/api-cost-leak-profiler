@@ -10,13 +10,16 @@ describe('OversizedPromptDetector', () => {
   it.each([{ inputTokens: 50_000, outputTokens: 0 }, { inputTokens: 0, outputTokens: 16_000 }])('flags exact inclusive token threshold and includes provider evidence', async (counts) => {
     findMany.mockResolvedValue([{ id: 'large-1', ...counts, model: 'gemini-test', featureId: 'large.prompt' }]);
     const result = await detector.run(context);
+    expect(result.recordsScanned).toBe(1);
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]).toMatchObject({ evidence: { ...counts, model: 'gemini-test', featureId: 'large.prompt' }, usageRecordIds: [{ id: 'large-1', role: 'primary' }] });
   });
 
   it('does not query or flag values below both thresholds and keeps tenant scope', async () => {
     findMany.mockResolvedValue([]);
-    expect((await detector.run(context)).findings).toHaveLength(0);
+    const result = await detector.run(context);
+    expect(result.recordsScanned).toBe(0);
+    expect(result.findings).toHaveLength(0);
     const query = findMany.mock.calls[0][0];
     expect(query.where.organizationId).toBe('org-a');
     expect(query.where.projectId).toBe('project-a');

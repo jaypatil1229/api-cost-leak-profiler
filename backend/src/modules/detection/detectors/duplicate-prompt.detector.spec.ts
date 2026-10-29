@@ -61,6 +61,7 @@ describe('DuplicatePromptDetector', () => {
       windowEnd: new Date('2026-09-02'),
     });
 
+    expect(result.recordsScanned).toBe(3);
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0].title).toContain('Duplicate prompt detected');
     expect(result.findings[0].usageRecordIds).toHaveLength(3);
@@ -90,6 +91,7 @@ describe('DuplicatePromptDetector', () => {
       windowEnd: new Date('2026-09-02'),
     });
 
+    expect(result.recordsScanned).toBe(2);
     expect(result.findings).toHaveLength(0);
   });
 });

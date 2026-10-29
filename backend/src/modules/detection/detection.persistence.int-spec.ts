@@ -433,6 +433,121 @@ describePostgres('PostgreSQL finding and alert uniqueness', () => {
     expect(page.items[0].id).toBe(refreshed.id);
   });
 
+  it('keeps equal-timestamp alert pages deterministic and only moves the refreshed issue', async () => {
+    const alerts = new AlertsService(
+      prisma as unknown as PrismaService,
+      { limits: { defaultPageSize: 25, maxPageSize: 100 } } as Configuration,
+    );
+    const tiedTimestamp = new Date('2001-01-01T00:00:00.000Z');
+    const issueKeys = Array.from({ length: 3 }, () => `retry-loop:${projectId}:${randomUUID()}`);
+    const initialFindings = [];
+
+    for (let index = 0; index < issueKeys.length; index += 1) {
+      const issueKey = issueKeys[index];
+      const finding = await prisma.detectionFinding.create({
+        data: {
+          organizationId,
+          projectId,
+          detectorType: DetectorType.RETRY_LOOP,
+          detectorVersion: '2.0.0',
+          title: `Tied-order fixture ${index}`,
+          explanation: 'Integration test fixture for deterministic alert pagination.',
+          severity: Severity.MEDIUM,
+          evidence: { attemptCount: 5 },
+          fingerprint: randomUUID().replaceAll('-', '').padEnd(64, 'b'),
+          issueKey,
+          windowStart: tiedTimestamp,
+          windowEnd: new Date(tiedTimestamp.getTime() + 2_000),
+        },
+      });
+      initialFindings.push(finding);
+      await alerts.createAlertFromFinding(organizationId, {
+        id: finding.id,
+        projectId,
+        title: finding.title,
+        description: finding.explanation,
+        severity: finding.severity,
+        evidence: finding.evidence,
+        estimatedRecoverableCost: null,
+        issueKey,
+      });
+      await prisma.$executeRaw`
+        UPDATE "Alert"
+        SET "createdAt" = ${tiedTimestamp}, "updatedAt" = ${tiedTimestamp}
+        WHERE "findingId" = ${finding.id}::uuid
+      `;
+    }
+
+    let allAlerts = await alerts.listAlerts(organizationId, { projectId, limit: 100 } as never);
+    const tiedIds = initialFindings.map((finding) => finding.id);
+    const tiedOrder = allAlerts.items.filter((item) => tiedIds.includes(item.findingId ?? ''));
+    const expectedTieOrder = tiedOrder.map((item) => item.id).sort((left, right) => right.localeCompare(left));
+    expect(tiedOrder.map((item) => item.id)).toEqual(expectedTieOrder);
+
+    for (const findingId of tiedIds) {
+      const absoluteIndex = allAlerts.items.findIndex((item) => item.findingId === findingId);
+      const page = await alerts.listAlerts(organizationId, {
+        projectId,
+        page: absoluteIndex + 1,
+        limit: 1,
+      } as never);
+      expect(page.items[0]?.findingId).toBe(findingId);
+    }
+
+    const refreshedFinding = await prisma.detectionFinding.create({
+      data: {
+        organizationId,
+        projectId,
+        detectorType: DetectorType.RETRY_LOOP,
+        detectorVersion: '2.0.0',
+        title: 'Refreshed stable issue',
+        explanation: 'The same logical retry issue appeared in a later run.',
+        severity: Severity.HIGH,
+        evidence: { attemptCount: 6 },
+        fingerprint: randomUUID().replaceAll('-', '').padEnd(64, 'c'),
+        issueKey: issueKeys[0],
+        windowStart: new Date(tiedTimestamp.getTime() + 1_000),
+        windowEnd: new Date(tiedTimestamp.getTime() + 3_000),
+      },
+    });
+    const originalAlert = await prisma.alert.findUniqueOrThrow({
+      where: { findingId: initialFindings[0].id },
+    });
+    const acknowledgedAt = new Date();
+    await prisma.alert.update({
+      where: { id: originalAlert.id },
+      data: { status: AlertStatus.ACKNOWLEDGED, acknowledgedAt, acknowledgedByUserId: userId },
+    });
+    const unrelatedBefore = await prisma.alert.findUniqueOrThrow({
+      where: { findingId: initialFindings[1].id },
+      select: { updatedAt: true, status: true },
+    });
+
+    await alerts.createAlertFromFinding(organizationId, {
+      id: refreshedFinding.id,
+      projectId,
+      title: refreshedFinding.title,
+      description: refreshedFinding.explanation,
+      severity: refreshedFinding.severity,
+      evidence: refreshedFinding.evidence,
+      estimatedRecoverableCost: null,
+      issueKey: issueKeys[0],
+    });
+
+    const refreshedAlert = await prisma.alert.findUniqueOrThrow({ where: { id: originalAlert.id } });
+    const unrelatedAfter = await prisma.alert.findUniqueOrThrow({
+      where: { findingId: initialFindings[1].id },
+      select: { updatedAt: true, status: true },
+    });
+    expect(refreshedAlert.findingId).toBe(refreshedFinding.id);
+    expect(refreshedAlert.status).toBe(AlertStatus.ACKNOWLEDGED);
+    expect(refreshedAlert.acknowledgedAt).toEqual(acknowledgedAt);
+    expect(unrelatedAfter).toEqual(unrelatedBefore);
+
+    allAlerts = await alerts.listAlerts(organizationId, { projectId, limit: 100 } as never);
+    expect(allAlerts.items[0]?.id).toBe(originalAlert.id);
+  });
+
   it('denies cross-tenant run creation and finding/alert reads and updates', async () => {
     if (!findingId || !alertId) throw new Error('Finding and alert fixtures must exist first.');
     const registry = new DetectorRegistry();

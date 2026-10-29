@@ -16,6 +16,7 @@ describe('UnboundedContextDetector', () => {
   it('flags five rows with four monotone increases and reports session evidence', async () => {
     findMany.mockResolvedValue(makeRows([10, 20, 30, 40, 50]));
     const result = await detector.run(context);
+    expect(result.recordsScanned).toBe(5);
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]).toMatchObject({ evidence: { sessionId: 'session-positive', callCount: 5, growthRatio: 1, peakInputTokens: 50 } });
     expect(result.findings[0].usageRecordIds).toHaveLength(5);
@@ -25,7 +26,9 @@ describe('UnboundedContextDetector', () => {
     findMany.mockResolvedValue(makeRows([10, 20, 30, 40]));
     expect((await detector.run(context)).findings).toHaveLength(0);
     findMany.mockResolvedValue(makeRows([10, 20, 15, 30, 40])); // 3/4 = exactly 75%
-    expect((await detector.run(context)).findings).toHaveLength(0);
+    const belowGrowthThreshold = await detector.run(context);
+    expect(belowGrowthThreshold.recordsScanned).toBe(5);
+    expect(belowGrowthThreshold.findings).toHaveLength(0);
   });
 
   it('ignores null sessions and scopes query to organization, project, and window', async () => {
